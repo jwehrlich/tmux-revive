@@ -1,0 +1,18 @@
+# Test artifacts
+.tmp/
+tests/tmp/
+*.tmp
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc

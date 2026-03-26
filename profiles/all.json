@@ -1,0 +1,7 @@
+{
+  "name": "all",
+  "attach": true,
+  "preview": false,
+  "include_archived": true,
+  "startup_mode": "auto"
+}

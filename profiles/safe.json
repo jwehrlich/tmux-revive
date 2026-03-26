@@ -1,0 +1,7 @@
+{
+  "name": "safe",
+  "attach": false,
+  "preview": true,
+  "include_archived": false,
+  "startup_mode": "prompt"
+}
