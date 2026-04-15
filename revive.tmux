@@ -103,6 +103,10 @@ tmux bind-key -T revive q switch-client -T root
 tmux bind-key -T revive Escape switch-client -T root
 tmux bind-key -T revive x run-shell -b \
   "$_E '$CURRENT_DIR/clear-save-lock.sh'"
+tmux bind-key -T revive u run-shell -b \
+  "$_E '$CURRENT_DIR/check-updates.sh --interactive'"
+tmux bind-key -T revive U run-shell -b \
+  "$_E '$CURRENT_DIR/apply-updates.sh'"
 
 tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Revive picker"        m "display-popup -E -w 80% -h 70% '$_E $CURRENT_DIR/pick.sh'" \
@@ -112,6 +116,8 @@ tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Save"                  s "run-shell -b '$_E $CURRENT_DIR/save-state.sh --reason manage-mode'" \
   "Restore latest"        R "run-shell -b '$_E $CURRENT_DIR/restore-state.sh --latest --yes'" \
   "Clear save lock"       x "run-shell -b '$_E $CURRENT_DIR/clear-save-lock.sh'" \
+  "Check for updates"     u "run-shell -b '$_E $CURRENT_DIR/check-updates.sh --interactive'" \
+  "Apply update"          U "run-shell -b '$_E $CURRENT_DIR/apply-updates.sh'" \
   "" \
   "Close"                 q ""
 
