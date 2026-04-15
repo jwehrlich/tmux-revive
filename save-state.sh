@@ -157,15 +157,18 @@ notify_manual_save_success() {
 
 prune_snapshots_if_enabled() {
   local prune_snapshots_cmd="${TMUX_REVIVE_PRUNE_SNAPSHOTS_CMD:-$script_dir/prune-snapshots.sh}"
-  env \
-    "TMUX_REVIVE_STATE_ROOT=${TMUX_REVIVE_STATE_ROOT-}" \
-    "TMUX_REVIVE_RETENTION_ENABLED=${TMUX_REVIVE_RETENTION_ENABLED-}" \
-    "TMUX_REVIVE_RETENTION_AUTO_COUNT=${TMUX_REVIVE_RETENTION_AUTO_COUNT-}" \
-    "TMUX_REVIVE_RETENTION_MANUAL_COUNT=${TMUX_REVIVE_RETENTION_MANUAL_COUNT-}" \
-    "TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS=${TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS-}" \
-    "TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=${TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS-}" \
-    "TMUX_REVIVE_RETENTION_ACTION_LOG=${TMUX_REVIVE_RETENTION_ACTION_LOG-}" \
-    bash "$prune_snapshots_cmd" >/dev/null 2>&1 || true
+  # Run pruning in the background — it doesn't need to block save completion
+  (
+    env \
+      "TMUX_REVIVE_STATE_ROOT=${TMUX_REVIVE_STATE_ROOT-}" \
+      "TMUX_REVIVE_RETENTION_ENABLED=${TMUX_REVIVE_RETENTION_ENABLED-}" \
+      "TMUX_REVIVE_RETENTION_AUTO_COUNT=${TMUX_REVIVE_RETENTION_AUTO_COUNT-}" \
+      "TMUX_REVIVE_RETENTION_MANUAL_COUNT=${TMUX_REVIVE_RETENTION_MANUAL_COUNT-}" \
+      "TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS=${TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS-}" \
+      "TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=${TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS-}" \
+      "TMUX_REVIVE_RETENTION_ACTION_LOG=${TMUX_REVIVE_RETENTION_ACTION_LOG-}" \
+      bash "$prune_snapshots_cmd" >/dev/null 2>&1 || true
+  ) &
 }
 
 run_queued_auto_save_if_needed() {
@@ -548,6 +551,11 @@ _sessions_ndjson=""
 # Cache global option once instead of reading per-pane
 _cached_capture_lines="$(tmux_revive_get_global_option '@tmux-revive-capture-lines' '499')"
 case "$_cached_capture_lines" in ''|*[!0-9]*) _cached_capture_lines=499 ;; esac
+if [ "$auto_mode" = "true" ]; then
+  _cached_autosave_lines="$(tmux_revive_get_global_option '@tmux-revive-autosave-capture-lines' '50')"
+  case "$_cached_autosave_lines" in ''|*[!0-9]*) _cached_autosave_lines=50 ;; esac
+  _cached_capture_lines="$_cached_autosave_lines"
+fi
 # Cache restartable-commands option so it's not read per-pane via tmux IPC
 _cached_restartable_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
 process_table="$(tmux_revive_process_table || true)"

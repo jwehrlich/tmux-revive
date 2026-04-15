@@ -80,17 +80,17 @@ teardown() {
   [ -f "$latest_manifest_path" ] || fail "fresh latest snapshot was pruned unexpectedly"
 }
 
-@test "snapshot retention AND logic" {
+@test "snapshot retention OR logic" {
   now_epoch="$(date +%s)"
 
   # Create snapshots: recent (within age) but exceeding count limit
-  # With both limits active, a recent snapshot should be KEPT even if count is exceeded
+  # With OR logic, count-exceeded alone should trigger pruning
   unused_manifest_path="$(create_fake_snapshot_manifest "auto-recent-1" "$((now_epoch - 120))" "auto-recent-1" "auto")"
   unused_manifest_path="$(create_fake_snapshot_manifest "auto-recent-2" "$((now_epoch - 100))" "auto-recent-2" "auto")"
   latest_manifest_path="$(create_fake_snapshot_manifest "auto-recent-3" "$((now_epoch - 60))" "auto-recent-3" "auto" false false true)"
 
   # COUNT=1 AGE_DAYS=1: count is exceeded (3 > 1) but all are within age (< 1 day)
-  # Under AND logic: should NOT prune because age is not exceeded
+  # Under OR logic: should prune because count is exceeded
   output="$(
     TMUX_REVIVE_RETENTION_AUTO_COUNT=1 \
     TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS=1 \
@@ -99,9 +99,8 @@ teardown() {
     "$prune_snapshots" --dry-run --print-actions
   )"
 
-  assert_contains "$output" "auto-recent-1/manifest.json"$'\tretained' "retention AND logic keeps recent snapshot within age limit"
-  assert_contains "$output" "auto-recent-2/manifest.json"$'\tretained' "retention AND logic keeps second recent snapshot within age limit"
-  assert_contains "$output" "$latest_manifest_path"$'\tlatest' "retention AND logic keeps latest snapshot"
+  assert_contains "$output" "auto-recent-1/manifest.json"$'\tcount' "retention OR logic prunes recent snapshot exceeding count"
+  assert_contains "$output" "$latest_manifest_path"$'\tlatest' "retention OR logic keeps latest snapshot"
 
   # Now add an old snapshot that exceeds BOTH limits
   old_manifest_path="$(create_fake_snapshot_manifest "auto-old" "$((now_epoch - (3 * 86400)))" "auto-old" "auto")"
@@ -115,7 +114,7 @@ teardown() {
     "$prune_snapshots" --dry-run --print-actions
   )"
 
-  assert_contains "$output" "$old_manifest_path"$'\tage-and-count' "retention AND logic prunes old snapshot exceeding both limits"
+  assert_contains "$output" "$old_manifest_path"$'\tage-and-count' "retention OR logic prunes old snapshot exceeding both limits"
 }
 
 @test "save state applies retention policy" {
@@ -144,8 +143,9 @@ EOF
   new_latest_manifest="$(latest_manifest)"
   [ -f "$new_latest_manifest" ] || fail "save-state retention integration did not produce a latest manifest"
   [ "$new_latest_manifest" != "$old_manifest_path" ] || fail "save-state retention integration did not publish a new manifest"
+  # Prune now runs in the background — wait for it to complete
   wait_for_file "$prune_wrapper_log" || fail "save-state retention integration did not call prune wrapper"
-  [ ! -f "$old_manifest_path" ] || fail "save-state retention integration did not prune the old manifest"
+  wait_for_path_missing "$old_manifest_path" || fail "save-state retention integration did not prune the old manifest"
   manifest_count="$(find "$TMUX_REVIVE_STATE_ROOT/snapshots/$host_name" -type f -name manifest.json | wc -l | tr -d ' ')"
   assert_eq "1" "$manifest_count" "save-state retention integration manifest count"
   assert_eq "manual" "$(jq -r '.save_mode' "$new_latest_manifest")" "save-state retention integration save mode"
@@ -170,6 +170,14 @@ EOF
   export TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=0
   "$save_state" --reason "retention-trigger"
 
+  # Prune runs async — wait for it to take effect
+  local attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    count_after="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
+    [ "$count_after" -ge "$count_before" ] || break
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
   count_after="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
   [ "$count_after" -le "$count_before" ] || fail "retention policy did not prune (before=$count_before after=$count_after)"
   unset TMUX_REVIVE_RETENTION_MANUAL_COUNT TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS
@@ -191,6 +199,7 @@ EOF
   export TMUX_REVIVE_RETENTION_MANUAL_COUNT=0
   export TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=0
   "$save_state" --reason "zero-both-trigger"
+  sleep 1
   count_after="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
   [ "$count_after" -ge "$count_before" ] || fail "both=0 should keep all (before=$count_before after=$count_after)"
 
@@ -198,6 +207,7 @@ EOF
   export TMUX_REVIVE_RETENTION_MANUAL_COUNT=0
   export TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=1
   "$save_state" --reason "zero-count-trigger"
+  sleep 1
   count_after2="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
   [ "$count_after2" -ge "$count_after" ] || fail "count=0 should not prune fresh snapshots (before=$count_after after=$count_after2)"
 
@@ -205,8 +215,71 @@ EOF
   export TMUX_REVIVE_RETENTION_MANUAL_COUNT=2
   export TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=0
   "$save_state" --reason "zero-age-trigger"
+  # Wait for async prune to complete
+  local attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    count_after3="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
+    [ "$count_after3" -gt 3 ] || break
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
   count_after3="$(find "$snapshots_root" -name manifest.json | wc -l | tr -d ' ')"
   [ "$count_after3" -le 3 ] || fail "age=0 count=2 should prune to ~2 kept (got $count_after3)"
 
   unset TMUX_REVIVE_RETENTION_MANUAL_COUNT TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS
+}
+
+@test "prune does not block save completion" {
+  now_epoch="$(date +%s)"
+  create_fake_snapshot_manifest "manual-old" "$((now_epoch - 600))" "manual-old" "manual" false false true
+
+  prune_wrapper_log="$case_root/prune-wrapper.log"
+  prune_wrapper="$case_root/prune-wrapper.sh"
+
+  # Slow prune wrapper that sleeps to simulate heavy prune work
+  cat >"$prune_wrapper" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'started\n' >"$prune_wrapper_log"
+sleep 2
+printf 'done\n' >>"$prune_wrapper_log"
+EOF
+  chmod +x "$prune_wrapper"
+
+  tmux new-session -d -s work
+  tmux set-option -g @tmux-revive-retention-enabled on
+
+  start_time="$(date +%s)"
+  TMUX_REVIVE_PRUNE_SNAPSHOTS_CMD="$prune_wrapper" "$save_state" --reason prune-async-test
+  end_time="$(date +%s)"
+
+  elapsed=$((end_time - start_time))
+  # Save should return well before the 2s sleep in the prune wrapper
+  [ "$elapsed" -lt 2 ] || fail "save blocked on prune (took ${elapsed}s, expected <2s)"
+
+  # Prune should still start in the background
+  wait_for_file "$prune_wrapper_log" || fail "prune wrapper was not called"
+  assert_contains "$(head -1 "$prune_wrapper_log")" "started" "prune wrapper started"
+}
+
+@test "retention count-only prune with both limits configured" {
+  now_epoch="$(date +%s)"
+
+  # 5 auto snapshots, all within age (< 1 day), but count=2 should prune the excess
+  for i in 1 2 3 4; do
+    create_fake_snapshot_manifest "auto-s$i" "$((now_epoch - (500 - i * 100)))" "auto-s$i" "auto"
+  done
+  create_fake_snapshot_manifest "auto-s5" "$((now_epoch - 10))" "auto-s5" "auto" false false true
+
+  output="$(
+    TMUX_REVIVE_RETENTION_AUTO_COUNT=2 \
+    TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS=14 \
+    TMUX_REVIVE_RETENTION_MANUAL_COUNT=100 \
+    TMUX_REVIVE_RETENTION_MANUAL_AGE_DAYS=0 \
+    "$prune_snapshots" --dry-run --print-actions
+  )"
+
+  # With OR logic, count=2 should prune the 3 oldest even though age (14d) isn't exceeded
+  prune_count="$(printf '%s\n' "$output" | grep -c $'^prune\t' || true)"
+  [ "$prune_count" -ge 2 ] || fail "expected at least 2 pruned snapshots, got $prune_count; output: $output"
 }

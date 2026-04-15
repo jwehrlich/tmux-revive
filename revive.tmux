@@ -136,7 +136,10 @@ tmux set-hook -g session-closed \
 # ---------------------------------------------------------------------------
 
 if [ "$autosave" = "on" ]; then
-  "$CURRENT_DIR/autosave-timer-init.sh" "#{socket_path}" &
+  # Resolve socket path now — #{socket_path} is a tmux format string and
+  # won't be expanded inside a shell backgrounded with &.
+  _resolved_socket="$(tmux display-message -p '#{socket_path}' 2>/dev/null || true)"
+  "$CURRENT_DIR/autosave-timer-init.sh" "$_resolved_socket" &
 fi
 
 # ---------------------------------------------------------------------------

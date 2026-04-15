@@ -224,18 +224,12 @@ while IFS=$'\t' read -r epoch snapshot_class keep_flag imported_flag manifest_pa
       count_exceeded="true"
     fi
 
-    # Prune only when ALL active limits agree the snapshot should go.
+    # Prune when ANY active limit says the snapshot should go.
     # A zero limit means "don't limit by this dimension".
-    # When both limits are active: prune only if both exceeded (AND).
+    # When both limits are active: prune if either exceeded (OR).
     # When only one limit is active: prune if that one is exceeded.
     should_prune="false"
-    if [ "$age_days" -gt 0 ] && [ "$count_limit" -gt 0 ]; then
-      # Both limits active: require both exceeded
-      if [ "$age_exceeded" = "true" ] && [ "$count_exceeded" = "true" ]; then
-        should_prune="true"
-      fi
-    elif [ "$age_exceeded" = "true" ] || [ "$count_exceeded" = "true" ]; then
-      # Only one limit active and exceeded
+    if [ "$age_exceeded" = "true" ] || [ "$count_exceeded" = "true" ]; then
       should_prune="true"
     fi
 

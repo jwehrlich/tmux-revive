@@ -130,7 +130,8 @@ tmux_revive_socket_key() {
     return 0
   fi
   local socket_path
-  if [ -n "${TMUX_REVIVE_SOCKET_PATH:-}" ]; then
+  # Reject unexpanded tmux format strings (e.g. literal "#{socket_path}")
+  if [ -n "${TMUX_REVIVE_SOCKET_PATH:-}" ] && [ "${TMUX_REVIVE_SOCKET_PATH#\#\{}" = "$TMUX_REVIVE_SOCKET_PATH" ]; then
     socket_path="$TMUX_REVIVE_SOCKET_PATH"
   elif [ -n "${TMUX:-}" ]; then
     socket_path="${TMUX%%,*}"

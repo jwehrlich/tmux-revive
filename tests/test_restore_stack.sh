@@ -801,18 +801,18 @@ test_snapshot_retention_age_policy() {
   pass "snapshot-retention-age-policy"
 }
 
-test_snapshot_retention_and_logic() {
-  setup_case "snapshot-retention-and"
+test_snapshot_retention_or_logic() {
+  setup_case "snapshot-retention-or"
   now_epoch="$(date +%s)"
 
   # Create snapshots: recent (within age) but exceeding count limit
-  # With both limits active, a recent snapshot should be KEPT even if count is exceeded
+  # With OR logic, count-exceeded alone should trigger pruning
   unused_manifest_path="$(create_fake_snapshot_manifest "auto-recent-1" "$((now_epoch - 120))" "auto-recent-1" "auto")"
   unused_manifest_path="$(create_fake_snapshot_manifest "auto-recent-2" "$((now_epoch - 100))" "auto-recent-2" "auto")"
   latest_manifest_path="$(create_fake_snapshot_manifest "auto-recent-3" "$((now_epoch - 60))" "auto-recent-3" "auto" false false true)"
 
   # COUNT=1 AGE_DAYS=1: count is exceeded (3 > 1) but all are within age (< 1 day)
-  # Under AND logic: should NOT prune because age is not exceeded
+  # Under OR logic: should prune because count is exceeded
   output="$(
     TMUX_REVIVE_RETENTION_AUTO_COUNT=1 \
     TMUX_REVIVE_RETENTION_AUTO_AGE_DAYS=1 \
@@ -821,9 +821,8 @@ test_snapshot_retention_and_logic() {
     "$prune_snapshots" --dry-run --print-actions
   )"
 
-  assert_contains "$output" "auto-recent-1/manifest.json"$'\tretained' "retention AND logic keeps recent snapshot within age limit"
-  assert_contains "$output" "auto-recent-2/manifest.json"$'\tretained' "retention AND logic keeps second recent snapshot within age limit"
-  assert_contains "$output" "$latest_manifest_path"$'\tlatest' "retention AND logic keeps latest snapshot"
+  assert_contains "$output" "auto-recent-1/manifest.json"$'\tcount' "retention OR logic prunes recent snapshot exceeding count"
+  assert_contains "$output" "$latest_manifest_path"$'\tlatest' "retention OR logic keeps latest snapshot"
 
   # Now add an old snapshot that exceeds BOTH limits
   old_manifest_path="$(create_fake_snapshot_manifest "auto-old" "$((now_epoch - (3 * 86400)))" "auto-old" "auto")"
@@ -837,8 +836,8 @@ test_snapshot_retention_and_logic() {
     "$prune_snapshots" --dry-run --print-actions
   )"
 
-  assert_contains "$output" "$old_manifest_path"$'\tage-and-count' "retention AND logic prunes old snapshot exceeding both limits"
-  pass "snapshot-retention-and-logic"
+  assert_contains "$output" "$old_manifest_path"$'\tage-and-count' "retention OR logic prunes old snapshot exceeding both limits"
+  pass "snapshot-retention-or-logic"
 }
 
 test_save_state_applies_retention_policy() {
@@ -869,7 +868,7 @@ EOF
   [ -f "$new_latest_manifest" ] || fail "save-state retention integration did not produce a latest manifest"
   [ "$new_latest_manifest" != "$old_manifest_path" ] || fail "save-state retention integration did not publish a new manifest"
   wait_for_file "$prune_wrapper_log" || fail "save-state retention integration did not call prune wrapper"
-  [ ! -f "$old_manifest_path" ] || fail "save-state retention integration did not prune the old manifest"
+  wait_for_path_missing "$old_manifest_path" || fail "save-state retention integration did not prune the old manifest"
   manifest_count="$(find "$TMUX_REVIVE_STATE_ROOT/snapshots/$host_name" -type f -name manifest.json | wc -l | tr -d ' ')"
   assert_eq "1" "$manifest_count" "save-state retention integration manifest count"
   assert_eq "manual" "$(jq -r '.save_mode' "$new_latest_manifest")" "save-state retention integration save mode"
@@ -3677,7 +3676,7 @@ run_all() {
   test_restore_health_warnings_preview_and_report
   test_snapshot_retention_count_policy
   test_snapshot_retention_age_policy
-  test_snapshot_retention_and_logic
+  test_snapshot_retention_or_logic
   test_save_state_applies_retention_policy
   test_autosave_policy
   test_statusline_save_notice_uses_tmux_socket_env
@@ -3746,7 +3745,7 @@ case "${1:-all}" in
   retention)
     test_snapshot_retention_count_policy
     test_snapshot_retention_age_policy
-    test_snapshot_retention_and_logic
+    test_snapshot_retention_or_logic
     test_save_state_applies_retention_policy
     test_retention_boundary_values
     test_retention_zero_limits

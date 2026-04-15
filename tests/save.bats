@@ -237,3 +237,54 @@ EOF
   assert_contains "$report_text" "tail target is missing:" "restore health report missing tail target"
   assert_contains "$report_text" "Neovim state references 1 missing file(s):" "restore health report missing nvim target"
 }
+
+@test "autosave uses reduced capture lines" {
+  tmux new-session -d -s work
+  # Generate enough scrollback content
+  tmux send-keys -t work "for i in \$(seq 1 200); do echo \"scrollback line \$i\"; done" Enter
+  sleep 1
+
+  # Manual save should capture the full default (499 lines)
+  "$save_state" --reason manual-capture-test
+  manual_manifest="$(latest_manifest)"
+  manual_snapshot_dir="$(dirname "$manual_manifest")"
+  manual_history="$(find "$manual_snapshot_dir/panes" -name '*.history.txt' | head -1)"
+  [ -n "$manual_history" ] || fail "no history file in manual save"
+  manual_lines="$(wc -l < "$manual_history" | tr -d ' ')"
+
+  # Auto save should capture fewer lines (default 50)
+  "$save_state" --auto --reason autosave-capture-test
+  auto_manifest="$(latest_manifest)"
+  auto_snapshot_dir="$(dirname "$auto_manifest")"
+  auto_history="$(find "$auto_snapshot_dir/panes" -name '*.history.txt' | head -1)"
+  [ -n "$auto_history" ] || fail "no history file in auto save"
+  auto_lines="$(wc -l < "$auto_history" | tr -d ' ')"
+
+  # Auto save should have significantly fewer lines than manual save
+  [ "$auto_lines" -lt "$manual_lines" ] || fail "autosave should capture fewer lines (auto=$auto_lines manual=$manual_lines)"
+  # capture-pane -S -50 captures 50 scrollback lines + visible pane area
+  [ "$auto_lines" -le 100 ] || fail "autosave captured too many lines (got $auto_lines, expected ≤100)"
+}
+
+@test "socket key rejects literal tmux format strings" {
+  # When TMUX_REVIVE_SOCKET_PATH is a literal #{socket_path} (unexpanded),
+  # tmux_revive_socket_key should fall through to tmux display-message
+  tmux new-session -d -s work
+
+  # Get the real socket key for comparison
+  real_key="$(tmux_revive_socket_key)"
+  [ -n "$real_key" ] || fail "could not determine real socket key"
+
+  # Simulate literal #{socket_path} from unexpanded tmux format
+  TMUX_REVIVE_SOCKET_PATH='#{socket_path}' result="$(tmux_revive_socket_key)"
+
+  # Should NOT contain the literal "#{" — it should have fallen through
+  case "$result" in
+    *'#{'*)
+      fail "socket key contains unexpanded format string: $result"
+      ;;
+  esac
+
+  # Should resolve to the same key as without the broken env var
+  assert_eq "$real_key" "$result" "socket key with literal format string should resolve correctly"
+}
