@@ -38,6 +38,9 @@ if [ "$autosave_enabled" = "off" ]; then
   exit 0
 fi
 
+# Watchdog: auto-clear stale save locks to prevent permanent deadlocks
+tmux_revive_check_stale_save_lock --clear || true
+
 # Check timing
 last_auto_path="$(tmux_revive_last_auto_save_path)"
 last_auto="$(tmux show-option -gqv '@tmux-revive-last-auto-save' 2>/dev/null || printf '')"

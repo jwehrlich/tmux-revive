@@ -288,3 +288,263 @@ EOF
   # Should resolve to the same key as without the broken env var
   assert_eq "$real_key" "$result" "socket key with literal format string should resolve correctly"
 }
+
+@test "save activity log records start and done" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  log_path="$runtime_dir/save-activity.log"
+  rm -f "$log_path"
+
+  "$save_state" --reason log-test
+
+  [ -f "$log_path" ] || fail "save-activity.log was not created"
+  log_content="$(cat "$log_path")"
+  assert_contains "$log_content" "START reason=log-test mode=manual" "log contains START entry"
+  assert_contains "$log_content" "DONE reason=log-test mode=manual" "log contains DONE entry"
+  assert_contains "$log_content" "duration=" "log contains duration"
+  assert_contains "$log_content" "snapshot=" "log contains snapshot id"
+}
+
+@test "save activity log records skip on lock contention" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  log_path="$runtime_dir/save-activity.log"
+  lock_dir="$runtime_dir/save.lock"
+  rm -f "$log_path"
+
+  # Create a fake lock held by our own PID (so it won't be stale)
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$$" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+
+  # Manual save should fail with SKIP log
+  "$save_state" --reason contention-test 2>/dev/null || true
+
+  [ -f "$log_path" ] || fail "save-activity.log was not created on skip"
+  log_content="$(cat "$log_path")"
+  assert_contains "$log_content" "SKIP reason=contention-test mode=manual" "log contains SKIP entry"
+
+  rm -rf "$lock_dir"
+}
+
+@test "queued saves coalesce to one follow-up" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  log_path="$runtime_dir/save-activity.log"
+  pending_path="$(tmux_revive_pending_save_path)"
+  lock_dir="$runtime_dir/save.lock"
+  rm -f "$log_path"
+
+  # Create a fake lock held by our PID
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$$" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+
+  # Queue multiple auto saves while lock is held
+  "$save_state" --auto --reason client-detached 2>/dev/null || true
+  "$save_state" --auto --reason session-closed 2>/dev/null || true
+  "$save_state" --auto --reason autosave-tick 2>/dev/null || true
+
+  # Only one pending file should exist (last wins)
+  [ -f "$pending_path" ] || fail "pending file not created"
+  pending_content="$(cat "$pending_path")"
+  assert_contains "$pending_content" "autosave-tick" "pending file contains last reason"
+
+  # Log should show coalesced entries
+  log_content="$(cat "$log_path")"
+  # First queue: coalesced=false, subsequent: coalesced=true
+  queue_count="$(grep -c 'QUEUE' "$log_path" || true)"
+  assert_eq "3" "$queue_count" "log should have 3 QUEUE entries"
+  coalesced_count="$(grep -c 'coalesced=true' "$log_path" || true)"
+  [ "$coalesced_count" -ge 1 ] || fail "expected at least 1 coalesced queue entry, got $coalesced_count"
+
+  rm -rf "$lock_dir"
+}
+
+@test "queued save runs after lock release" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  log_path="$runtime_dir/save-activity.log"
+  pending_path="$(tmux_revive_pending_save_path)"
+  rm -f "$log_path"
+
+  snapshots_root="$(tmux_revive_snapshots_root)"
+  count_before="$(find "$snapshots_root" -name manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+
+  # Create a pending save file before the save
+  mkdir -p "$(dirname "$pending_path")"
+  printf '%s queued-pre-test\n' "$(date +%s)" >"$pending_path"
+
+  # Run a save — it should pick up the pending file and launch a follow-up
+  "$save_state" --reason trigger-dequeue
+
+  # Wait for the queued save to complete (it runs in background)
+  local attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    count_after="$(find "$snapshots_root" -name manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+    # We expect at least 2 new snapshots: the trigger save + the queued save
+    [ "$((count_after - count_before))" -ge 2 ] && break
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+  count_after="$(find "$snapshots_root" -name manifest.json 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$((count_after - count_before))" -ge 2 ] || fail "queued save did not produce a follow-up snapshot (before=$count_before after=$count_after)"
+
+  # Log should show both the trigger save and the dequeued save
+  [ -f "$log_path" ] || fail "save-activity.log missing"
+  log_content="$(cat "$log_path")"
+  assert_contains "$log_content" "DEQUEUE" "log should contain DEQUEUE entry"
+  # The queued save should also have its own START/DONE
+  start_count="$(grep -c 'START' "$log_path" || true)"
+  [ "$start_count" -ge 2 ] || fail "expected at least 2 START entries in log (got $start_count)"
+}
+
+@test "stale lock is recovered and logged" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  log_path="$runtime_dir/save-activity.log"
+  rm -f "$log_path"
+
+  # Create a stale lock from a dead PID (PID 1 is init, won't be us, but use
+  # a certainly-dead PID by spawning and waiting for a subshell)
+  dead_pid=""
+  (exit 0) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null || true
+
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$dead_pid" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+
+  # Save should recover the stale lock and succeed
+  "$save_state" --reason stale-recovery-test
+
+  [ -f "$log_path" ] || fail "save-activity.log missing"
+  log_content="$(cat "$log_path")"
+  assert_contains "$log_content" "START reason=stale-recovery-test" "stale lock recovered — save started"
+  assert_contains "$log_content" "DONE reason=stale-recovery-test" "stale lock recovered — save completed"
+}
+
+@test "EXIT trap does not steal queued save lock" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  pending_path="$(tmux_revive_pending_save_path)"
+  log_path="$runtime_dir/save-activity.log"
+  rm -f "$log_path"
+
+  # Pre-create a pending save so the parent will launch a queued save
+  mkdir -p "$(dirname "$pending_path")"
+  printf '%s exit-trap-test\n' "$(date +%s)" >"$pending_path"
+
+  # Run save; after it exits, verify the queued save completed successfully
+  "$save_state" --reason exit-trap-parent
+
+  # Wait for the background queued save to finish
+  local attempts=0
+  while [ "$attempts" -lt 50 ]; do
+    done_count="$(grep -c 'DONE' "$log_path" 2>/dev/null || true)"
+    [ "$done_count" -ge 2 ] && break
+    sleep 0.2
+    attempts=$((attempts + 1))
+  done
+
+  done_count="$(grep -c 'DONE' "$log_path" 2>/dev/null || true)"
+  [ "$done_count" -ge 2 ] || fail "queued save did not complete — EXIT trap may have stolen its lock (DONE count=$done_count)"
+
+  # Verify lock dir is clean after both saves finish
+  sleep 0.5
+  [ ! -d "$lock_dir" ] || fail "lock dir still exists after both saves completed"
+}
+
+@test "watchdog clears stale lock on autosave tick" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  log_path="$runtime_dir/save-activity.log"
+  rm -f "$log_path"
+
+  # Create a stale lock with a dead PID
+  dead_pid=""
+  (exit 0) &
+  dead_pid=$!
+  wait "$dead_pid" 2>/dev/null || true
+
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$dead_pid" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+  [ -d "$lock_dir" ] || fail "lock dir not created for watchdog test"
+
+  # Run the watchdog function directly (same as what tick scripts call)
+  tmux_revive_check_stale_save_lock --clear || true
+
+  # Lock should be cleared
+  [ ! -d "$lock_dir" ] || fail "watchdog did not clear stale lock"
+
+  # Should be logged
+  [ -f "$log_path" ] || fail "watchdog did not write to save-activity.log"
+  log_content="$(cat "$log_path")"
+  assert_contains "$log_content" "WATCHDOG" "log should contain WATCHDOG entry"
+  assert_contains "$log_content" "dead-pid" "log should mention dead-pid reason"
+}
+
+@test "watchdog does not clear active lock" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+
+  # Create a lock held by our own PID (alive)
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$$" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+
+  # Watchdog should NOT clear it
+  tmux_revive_check_stale_save_lock --clear && \
+    fail "watchdog cleared an active lock" || true
+
+  [ -d "$lock_dir" ] || fail "active lock was cleared by watchdog"
+  rm -rf "$lock_dir"
+}
+
+@test "clear-save-lock.sh force-clears lock" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  log_path="$runtime_dir/save-activity.log"
+  rm -f "$log_path"
+
+  # Create a lock
+  mkdir -p "$lock_dir"
+  jq -cn --argjson pid "$$" --argjson started_at "$(date +%s)" \
+    '{ pid: $pid, started_at: $started_at }' >"$lock_dir/meta.json"
+
+  # Force-clear it
+  output="$("$tmux_revive_dir/clear-save-lock.sh" 2>&1)"
+  assert_contains "$output" "clearing save lock" "clear-save-lock reports action"
+  assert_contains "$output" "save lock cleared" "clear-save-lock reports success"
+
+  [ ! -d "$lock_dir" ] || fail "clear-save-lock did not remove lock dir"
+  [ -f "$log_path" ] || fail "clear-save-lock did not write to log"
+  assert_contains "$(cat "$log_path")" "FORCE-CLEAR" "log contains FORCE-CLEAR entry"
+}
+
+@test "clear-save-lock.sh reports no lock" {
+  tmux new-session -d -s work
+
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  rm -rf "$lock_dir"
+
+  output="$("$tmux_revive_dir/clear-save-lock.sh" 2>&1)"
+  assert_contains "$output" "no save lock found" "clear-save-lock reports nothing to clear"
+}

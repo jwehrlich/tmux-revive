@@ -101,6 +101,8 @@ tmux bind-key -T revive R run-shell -b \
   "$_E '$CURRENT_DIR/restore-state.sh' --latest --yes"
 tmux bind-key -T revive q switch-client -T root
 tmux bind-key -T revive Escape switch-client -T root
+tmux bind-key -T revive x run-shell -b \
+  "$_E '$CURRENT_DIR/clear-save-lock.sh'"
 
 tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Revive picker"        m "display-popup -E -w 80% -h 70% '$_E $CURRENT_DIR/pick.sh'" \
@@ -109,6 +111,7 @@ tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Set session label"     l "run-shell '$_E $CURRENT_DIR/set-session-label.sh'" \
   "Save"                  s "run-shell -b '$_E $CURRENT_DIR/save-state.sh --reason manage-mode'" \
   "Restore latest"        R "run-shell -b '$_E $CURRENT_DIR/restore-state.sh --latest --yes'" \
+  "Clear save lock"       x "run-shell -b '$_E $CURRENT_DIR/clear-save-lock.sh'" \
   "" \
   "Close"                 q ""
 

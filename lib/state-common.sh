@@ -416,6 +416,58 @@ tmux_revive_transient_session_option() {
   printf '%s\n' "@tmux-revive-transient-session"
 }
 
+# Check if the save lock is stale (dead PID or timed out) and optionally clear it.
+# Returns 0 (true) if stale lock was found and cleared, 1 otherwise.
+# Usage: tmux_revive_check_stale_save_lock [--clear]
+tmux_revive_check_stale_save_lock() {
+  local do_clear="false"
+  [ "${1:-}" = "--clear" ] && do_clear="true"
+
+  local runtime_dir lock_dir lock_meta_path
+  runtime_dir="$(tmux_revive_runtime_dir)"
+  lock_dir="$runtime_dir/save.lock"
+  lock_meta_path="$lock_dir/meta.json"
+  local save_log_path="$runtime_dir/save-activity.log"
+
+  [ -d "$lock_dir" ] || return 1
+
+  local started_at=0 pid=0
+  if [ -f "$lock_meta_path" ]; then
+    started_at="$(jq -r '.started_at // 0' "$lock_meta_path" 2>/dev/null || printf '0')"
+    pid="$(jq -r '.pid // 0' "$lock_meta_path" 2>/dev/null || printf '0')"
+    case "$started_at" in ''|*[!0-9]*) started_at=0 ;; esac
+    case "$pid" in ''|*[!0-9]*) pid=0 ;; esac
+  fi
+
+  local stale_reason=""
+  if [ "$pid" -gt 0 ] && ! kill -0 "$pid" >/dev/null 2>&1; then
+    stale_reason="dead-pid($pid)"
+  fi
+
+  if [ -z "$stale_reason" ]; then
+    local lock_timeout
+    lock_timeout="$(tmux_revive_get_global_option "$(tmux_revive_save_lock_timeout_option)" "120")"
+    case "$lock_timeout" in ''|*[!0-9]*) lock_timeout=120 ;; esac
+    local now
+    now="$(date +%s)"
+    if [ "$started_at" -gt 0 ] && [ $((now - started_at)) -gt "$lock_timeout" ]; then
+      stale_reason="timeout(${lock_timeout}s,pid=$pid)"
+    elif [ "$started_at" -eq 0 ] && [ ! -f "$lock_meta_path" ]; then
+      stale_reason="no-metadata"
+    fi
+  fi
+
+  [ -n "$stale_reason" ] || return 1
+
+  if [ "$do_clear" = "true" ]; then
+    rm -rf "$lock_dir"
+    printf '[%s] WATCHDOG cleared stale save lock: %s\n' \
+      "$(date +%Y-%m-%dT%H:%M:%S)" "$stale_reason" \
+      >>"$save_log_path" 2>/dev/null || true
+  fi
+  return 0
+}
+
 tmux_revive_resolve_pane_id() {
   local pane_id="${1:-}"
   if [ -n "$pane_id" ]; then

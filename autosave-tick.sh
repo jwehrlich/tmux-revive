@@ -135,6 +135,9 @@ if [ "$timer_active" = "1" ]; then
   fi
 fi
 
+# Watchdog: auto-clear stale save locks to prevent permanent deadlocks
+tmux_revive_check_stale_save_lock --clear || true
+
 if [ $((now - last_auto)) -lt "$interval" ]; then
   exit 0
 fi

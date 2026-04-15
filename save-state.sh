@@ -38,8 +38,15 @@ lock_meta_path="$lock_dir/meta.json"
 pending_path="$(tmux_revive_pending_save_path)"
 last_auto_path="$(tmux_revive_last_auto_save_path)"
 last_save_notice_path="$(tmux_revive_last_save_notice_path)"
+save_log_path="$runtime_dir/save-activity.log"
 
 mkdir -p "$runtime_dir"
+
+save_log() {
+  printf '[%s] %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$*" >>"$save_log_path" 2>/dev/null || true
+}
+
+_save_mode_label="$([ "$auto_mode" = "true" ] && printf 'auto' || printf 'manual')"
 
 save_lock_timeout="$(tmux_revive_get_global_option "$(tmux_revive_save_lock_timeout_option)" "120")"
 case "$save_lock_timeout" in
@@ -106,7 +113,10 @@ acquire_save_lock() {
 }
 
 queue_pending_auto_save() {
-  : >"$pending_path"
+  local was_pending="false"
+  [ -f "$pending_path" ] && was_pending="true"
+  printf '%s %s\n' "$(date +%s)" "$reason" >"$pending_path"
+  save_log "QUEUE reason=$reason mode=$_save_mode_label pid=$$ coalesced=$was_pending"
 }
 
 publish_latest_snapshot() {
@@ -174,13 +184,8 @@ prune_snapshots_if_enabled() {
 run_queued_auto_save_if_needed() {
   if [ -f "$pending_path" ]; then
     rm -f "$pending_path"
-    if ! "$0" --auto --reason queued >/dev/null 2>&1; then
-      local _err_log
-      _err_log="$(tmux_revive_runtime_dir)/save-errors.log"
-      printf '[%s] queued auto-save failed\n' "$(date +%Y-%m-%dT%H:%M:%S)" \
-        >>"$_err_log" 2>/dev/null || true
-      tmux_revive_truncate_log "$_err_log" 200
-    fi
+    save_log "DEQUEUE pid=$$ launching_queued_save=background"
+    ("$0" --auto --reason queued >/dev/null 2>&1 || true) &
   fi
 }
 
@@ -189,6 +194,7 @@ if ! acquire_save_lock; then
     queue_pending_auto_save
     exit 0
   else
+    save_log "SKIP reason=$reason mode=$_save_mode_label pid=$$ lock_held=true"
     tmux display-message "tmux-revive: save in progress, try again shortly" 2>/dev/null || true
     printf 'tmux-revive: could not acquire save lock\n' >&2
     exit 1
@@ -196,7 +202,11 @@ if ! acquire_save_lock; then
 fi
 
 cleanup() {
-  rm -rf "$lock_dir"
+  # Skip lock removal if we already explicitly released it (avoids racing
+  # with a background queued save that may have acquired the lock)
+  if [ "${_lock_released:-}" != "true" ]; then
+    rm -rf "$lock_dir"
+  fi
   # Remove incomplete snapshot tmp dir if the save did not finish
   if [ -n "${tmp_dir:-}" ] && [ -d "${tmp_dir:-}" ] && [ ! -f "${tmp_dir}/manifest.json" ]; then
     rm -rf "$tmp_dir"
@@ -226,6 +236,9 @@ write_saving_indicator() {
 }
 
 write_saving_indicator
+
+_save_start_epoch="$(date +%s)"
+save_log "START reason=$reason mode=$_save_mode_label pid=$$"
 
 host="$(tmux_revive_host)"
 snapshots_root="$(tmux_revive_snapshots_root)"
@@ -648,9 +661,19 @@ write_last_save_notice
 refresh_tmux_statusline
 notify_manual_save_success
 
+_save_end_epoch="$(date +%s)"
+_save_duration=$((_save_end_epoch - _save_start_epoch))
+save_log "DONE reason=$reason mode=$_save_mode_label pid=$$ duration=${_save_duration}s snapshot=$snapshot_id"
+tmux_revive_truncate_log "$save_log_path" 500
+
 run_save_hook "$(tmux_revive_post_save_hook_option)" "TMUX_REVIVE_POST_SAVE_HOOK" || true
 
 if [ "$auto_mode" = "true" ]; then
   sweep_stale_nvim_registry
 fi
+
+# Release the lock BEFORE launching queued save so the child can acquire it.
+# Set flag so the EXIT trap doesn't race with the child's lock.
+rm -rf "$lock_dir"
+_lock_released="true"
 run_queued_auto_save_if_needed
