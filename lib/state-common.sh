@@ -644,6 +644,60 @@ tmux_revive_session_is_transient() {
   [ "$value" = "1" ]
 }
 
+tmux_revive_generate_temp_session_name() {
+  local alphabet="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  local epoch=1704067200
+  local timestamp=$(( ($(date +%s) - epoch) / 60 ))
+  local random_part=$(( (RANDOM << 10) | (RANDOM & 0x3FF) ))
+  local combined=$(( (timestamp << 25) | (random_part & 0x1FFFFFF) ))
+  local res="" i mod
+  for i in 1 2 3 4 5 6 7 8; do
+    mod=$(( combined % 62 ))
+    res="${alphabet:$mod:1}$res"
+    combined=$(( combined / 62 ))
+  done
+  printf '_revive_tmp_%s' "$res"
+}
+
+# Rename a transient session out of the way if its name collides with sessions
+# about to be restored. Returns the new name on stdout; returns 1 if no rename
+# was needed or if the rename failed.
+tmux_revive_rename_transient_for_restore() {
+  local transient_target="$1"
+  shift
+  local restore_names=("$@")
+  [ -n "$transient_target" ] || return 1
+
+  local current_name
+  current_name="$(tmux display-message -p -t "$transient_target" '#{session_name}' 2>/dev/null || true)"
+  [ -n "$current_name" ] || return 1
+
+  local collides="false" rname
+  for rname in "${restore_names[@]}"; do
+    if [ "$rname" = "$current_name" ]; then
+      collides="true"
+      break
+    fi
+  done
+  [ "$collides" = "true" ] || return 1
+
+  local temp_name attempt
+  for attempt in 1 2 3; do
+    temp_name="$(tmux_revive_generate_temp_session_name)"
+    if ! tmux has-session -t "=$temp_name" 2>/dev/null; then
+      if tmux rename-session -t "$transient_target" "$temp_name" 2>/dev/null; then
+        local verify_name
+        verify_name="$(tmux display-message -p -t "$transient_target" '#{session_name}' 2>/dev/null || true)"
+        if [ "$verify_name" = "$temp_name" ]; then
+          printf '%s' "$temp_name"
+          return 0
+        fi
+      fi
+    fi
+  done
+  return 1
+}
+
 tmux_revive_shell_name() {
   local shell_bin="${1:-${SHELL:-/bin/sh}}"
   basename "$shell_bin"

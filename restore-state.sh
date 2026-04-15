@@ -1485,6 +1485,18 @@ run_restore_hook "$(tmux_revive_pre_restore_hook_option)" "TMUX_REVIVE_PRE_RESTO
   "TMUX_REVIVE_HOOK_SELECTOR_ID=$filter_session_id" \
   "TMUX_REVIVE_HOOK_SELECTOR_NAME=$filter_session_name" || true
 
+# Rename the transient session out of the way if it collides with a session
+# we're about to restore.  This avoids kill-session on the only live session
+# which would crash the tmux server.  The stable session-id ($cleanup_transient_session)
+# still tracks it for later cleanup in maybe_cleanup_transient_session().
+if [ -n "$cleanup_transient_session" ] && [ -n "$transient_session_name" ] \
+   && tmux_revive_session_is_transient "$cleanup_transient_session"; then
+  if new_transient_name="$(tmux_revive_rename_transient_for_restore "$cleanup_transient_session" "${resolved_restore_names[@]}")"; then
+    log_restore_event "transient-session-renamed from=$transient_session_name to=$new_transient_name target=$cleanup_transient_session"
+    transient_session_name="$new_transient_name"
+  fi
+fi
+
 restored_sessions=0
 skipped_collisions=()
 restored_session_refs=()
@@ -1513,23 +1525,11 @@ for pos in "${!session_indexes[@]}"; do
   fi
 
   if tmux has-session -t "=$tmux_session_name" 2>/dev/null; then
-    # If the only collision is the transient session we're replacing, kill it first
-    if [ -n "$transient_session_name" ] && [ "$tmux_session_name" = "$transient_session_name" ] \
-       && [ -n "$cleanup_transient_session" ] && tmux_revive_session_is_transient "$cleanup_transient_session"; then
-      tmux kill-session -t "=$cleanup_transient_session" >/dev/null 2>&1 || true
-      transient_cleanup_complete="true"
-      log_restore_event "transient-session-killed-for-name-reuse session=$tmux_session_name target=$cleanup_transient_session"
-      # Verify the name is now available — if someone re-created it, treat as collision
-      if tmux has-session -t "=$tmux_session_name" 2>/dev/null; then
-        skipped_collisions+=("$tmux_session_name")
-        skipped_session_refs+=("$(format_session_ref "$session_name" "$session_guid" "$tmux_session_name" "$session_id")")
-        continue
-      fi
-    else
-      skipped_collisions+=("$tmux_session_name")
-      skipped_session_refs+=("$(format_session_ref "$session_name" "$session_guid" "$tmux_session_name" "$session_id")")
-      continue
-    fi
+    # The transient session should have been renamed before the loop.
+    # If a collision still exists here, skip it rather than risk killing the only session.
+    skipped_collisions+=("$tmux_session_name")
+    skipped_session_refs+=("$(format_session_ref "$session_name" "$session_guid" "$tmux_session_name" "$session_id")")
+    continue
   fi
 
   if ! created_session_info="$(create_restore_session "$tmux_session_name" "$first_window_name" "$first_window_creation_cwd")"; then
