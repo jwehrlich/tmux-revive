@@ -323,23 +323,20 @@ build_pane_snapshot() {
   local nvim_state_ref restore_strategy nvim_registry_cwd
 
   meta_path="$(tmux_revive_pane_meta_path "$pane_id")"
-  transcript_excluded="$(tmux_revive_read_json_bool "$meta_path" "transcript_excluded")"
+
+  # Bulk-read all pane meta fields in a single jq call (unit-separator delimited)
+  local _bulk_sep=$'\x1f'
+  local _bulk_meta
+  _bulk_meta="$(tmux_revive_read_pane_meta_bulk "$meta_path")"
+  IFS="$_bulk_sep" read -r transcript_excluded command_preview command_capture_source restart_command restart_command_source restore_strategy_override <<< "$_bulk_meta"
+
   history_path=""
 
   if [ "$transcript_excluded" != "true" ]; then
     history_capture_path="$tmp_dir/panes/${pane_id}.history.txt"
     history_path="$(to_snapshot_path "$history_capture_path")"
-    local _capture_lines
-    _capture_lines="$(tmux_revive_get_global_option '@tmux-revive-capture-lines' '499')"
-    case "$_capture_lines" in ''|*[!0-9]*) _capture_lines=499 ;; esac
-    tmux capture-pane -p -S "-${_capture_lines}" -t "$pane_id" >"$history_capture_path" || true
+    tmux capture-pane -p -S "-${_cached_capture_lines}" -t "$pane_id" >"$history_capture_path" || true
   fi
-
-  command_preview="$(tmux_revive_read_json_string "$meta_path" "command_preview")"
-  command_capture_source="$(tmux_revive_read_json_string "$meta_path" "command_capture_source")"
-  restart_command="$(tmux_revive_read_json_string "$meta_path" "restart_command")"
-  restart_command_source="$(tmux_revive_read_json_string "$meta_path" "restart_command_source")"
-  restore_strategy_override="$(tmux_revive_read_json_string "$meta_path" "restore_strategy_override")"
 
   captured_running_command="$(tmux_revive_capture_pane_command_preview "$process_table" "$pane_pid" "$pane_command" "$command_preview" || true)"
   if [ -z "$command_preview" ] && [ -n "$captured_running_command" ]; then
@@ -378,15 +375,21 @@ build_pane_snapshot() {
       ;;
   esac
 
-  # Capture per-pane option overrides (only non-inherited values)
-  local pane_options_json="{}"
-  local _popt_key _popt_val
-  for _popt_key in pane-border-status pane-border-format pane-border-style remain-on-exit allow-rename; do
-    _popt_val="$(tmux show-options -p -t "$pane_id" -v "$_popt_key" 2>/dev/null || true)"
-    if [ -n "$_popt_val" ]; then
-      pane_options_json="$(jq -cn --argjson obj "$pane_options_json" --arg k "$_popt_key" --arg v "$_popt_val" '$obj + {($k): $v}')"
+  # Capture per-pane option overrides in a single tmux call + single jq call
+  local _all_pane_opts pane_options_json="{}"
+  _all_pane_opts="$(tmux show-options -p -t "$pane_id" 2>/dev/null || true)"
+  if [ -n "$_all_pane_opts" ]; then
+    local _popt_pairs="" _popt_key _popt_val
+    for _popt_key in pane-border-status pane-border-format pane-border-style remain-on-exit allow-rename; do
+      while IFS= read -r _popt_val; do
+        _popt_val="${_popt_val#"$_popt_key "}"
+        _popt_pairs="${_popt_pairs:+${_popt_pairs},}$(printf '"%s":"%s"' "$_popt_key" "$_popt_val")"
+      done <<< "$(printf '%s\n' "$_all_pane_opts" | grep "^${_popt_key} " || true)"
+    done
+    if [ -n "$_popt_pairs" ]; then
+      pane_options_json="{${_popt_pairs}}"
     fi
-  done
+  fi
 
   jq -cn \
     --arg pane_index "$pane_index" \
@@ -496,15 +499,21 @@ build_session_snapshot() {
     [[ "${window_flags:-}" == *Z* ]] && is_zoomed="true"
     local auto_rename
     auto_rename="$(tmux show-window-option -v -t "$tmux_session_name:$window_index" automatic-rename 2>/dev/null || printf '')"
-    # Capture per-window options that users commonly set
-    local _wopts_json="{}"
-    local _wopt_val
-    for _wopt_name in monitor-activity monitor-silence synchronize-panes; do
-      _wopt_val="$(tmux show-window-option -v -t "$tmux_session_name:$window_index" "$_wopt_name" 2>/dev/null || true)"
-      if [ -n "$_wopt_val" ]; then
-        _wopts_json="$(printf '%s' "$_wopts_json" | jq --arg k "$_wopt_name" --arg v "$_wopt_val" '.[$k] = $v')"
+    # Capture per-window options in a single tmux call
+    local _wopts_json="{}" _all_wopts
+    _all_wopts="$(tmux show-window-options -t "$tmux_session_name:$window_index" 2>/dev/null || true)"
+    if [ -n "$_all_wopts" ]; then
+      local _wopt_pairs="" _wopt_name _wopt_val
+      for _wopt_name in monitor-activity monitor-silence synchronize-panes; do
+        while IFS= read -r _wopt_val; do
+          _wopt_val="${_wopt_val#"$_wopt_name "}"
+          _wopt_pairs="${_wopt_pairs:+${_wopt_pairs},}$(printf '"%s":"%s"' "$_wopt_name" "$_wopt_val")"
+        done <<< "$(printf '%s\n' "$_all_wopts" | grep "^${_wopt_name} " || true)"
+      done
+      if [ -n "$_wopt_pairs" ]; then
+        _wopts_json="{${_wopt_pairs}}"
       fi
-    done
+    fi
     window_json="$(build_window_snapshot "$session_id" "$tmux_session_name" "$window_index" "$window_name" "$window_layout" "$window_active_pane" "$is_zoomed" "$auto_rename" "$_wopts_json")"
     _windows_ndjson="${_windows_ndjson:+${_windows_ndjson}
 }${window_json}"
@@ -536,6 +545,11 @@ active_session_guid=""
 active_session_order=1
 session_order=0
 _sessions_ndjson=""
+# Cache global option once instead of reading per-pane
+_cached_capture_lines="$(tmux_revive_get_global_option '@tmux-revive-capture-lines' '499')"
+case "$_cached_capture_lines" in ''|*[!0-9]*) _cached_capture_lines=499 ;; esac
+# Cache restartable-commands option so it's not read per-pane via tmux IPC
+_cached_restartable_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
 process_table="$(tmux_revive_process_table || true)"
 
 while IFS=$'\t' read -r session_id tmux_session_name session_group; do

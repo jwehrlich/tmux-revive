@@ -453,6 +453,25 @@ tmux_revive_read_json_string() {
   jq -r --arg key "$key" '.[$key] // ""' "$path"
 }
 
+# Read all pane-meta fields in a single jq call.  Fields are separated by
+# the unit separator (\x1f) to avoid collisions with tab/newline in values.
+tmux_revive_read_pane_meta_bulk() {
+  local path="$1"
+  local sep=$'\x1f'
+  if [ ! -f "$path" ]; then
+    printf 'false%s%s%s%s%s\n' "$sep" "$sep" "$sep" "$sep" "$sep"
+    return 0
+  fi
+  jq -r '[
+    (.transcript_excluded // false | tostring),
+    (.command_preview // ""),
+    (.command_capture_source // ""),
+    (.restart_command // ""),
+    (.restart_command_source // ""),
+    (.restore_strategy_override // "")
+  ] | join("\u001f")' "$path"
+}
+
 tmux_revive_write_json_file() {
   local path="$1"
   local tmp_path
@@ -892,7 +911,11 @@ tmux_revive_command_is_restartable() {
   #   ~substring->replacement    — substring match, restore with replacement command
   #   ~substring->replacement *  — substring match, restore with replacement + original args
   local user_commands
-  user_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
+  if [ -n "${_cached_restartable_commands+x}" ]; then
+    user_commands="$_cached_restartable_commands"
+  else
+    user_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
+  fi
   if [ -n "$user_commands" ]; then
     local user_cmd
     for user_cmd in $user_commands; do
@@ -919,7 +942,11 @@ tmux_revive_resolve_restart_command() {
   [ -n "$command" ] || return 0
 
   local user_commands
-  user_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
+  if [ -n "${_cached_restartable_commands+x}" ]; then
+    user_commands="$_cached_restartable_commands"
+  else
+    user_commands="$(tmux show-option -gqv '@tmux-revive-restartable-commands' 2>/dev/null || printf '')"
+  fi
   [ -n "$user_commands" ] || { printf '%s' "$command"; return 0; }
 
   local cmd1=""

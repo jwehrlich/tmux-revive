@@ -102,6 +102,25 @@ snapshot_imported_flag_for_manifest() {
   jq -r '(.imported // .source.imported // false)' "$manifest_path" 2>/dev/null || printf 'false\n'
 }
 
+# Read all four retention-relevant fields from a manifest in one jq call.
+# Output: tab-separated  epoch \t class \t keep \t imported
+snapshot_retention_fields() {
+  local manifest_path="$1"
+  local result
+  result="$(jq -r '[
+    (.last_updated_epoch // .created_at_epoch // 0 | tostring),
+    (if ((.save_mode // .retention_class // "") != "")
+     then (.save_mode // .retention_class)
+     elif ((.reason // "") | test("^(client-detached|queued)$"))
+     then "auto"
+     else "manual"
+     end),
+    (.keep // .retention.keep // false | tostring),
+    (.imported // .source.imported // false | tostring)
+  ] | join("\t")' "$manifest_path" 2>/dev/null || printf '0\tmanual\tfalse\tfalse')"
+  printf '%s\n' "$result"
+}
+
 emit_action() {
   local action="$1"
   local snapshot_class="$2"
@@ -134,12 +153,26 @@ latest_manifest="$(tmux_revive_find_latest_manifest || true)"
 now_epoch="$(date +%s)"
 
 manifest_rows="$(
-  find "$snapshots_root" -type f -name manifest.json | while IFS= read -r manifest_path; do
-    [ -f "$manifest_path" ] || continue
-    epoch="$(snapshot_epoch_for_manifest "$manifest_path")"
-    snapshot_class="$(snapshot_class_for_manifest "$manifest_path")"
-    keep_flag="$(snapshot_keep_flag_for_manifest "$manifest_path")"
-    imported_flag="$(snapshot_imported_flag_for_manifest "$manifest_path")"
+  find "$snapshots_root" -type f -name manifest.json -print0 \
+  | xargs -0 -P 4 -I{} sh -c '
+    _epoch="$(jq -r "[
+      (.last_updated_epoch // .created_at_epoch // 0 | tostring),
+      (if ((.save_mode // .retention_class // \"\") != \"\")
+       then (.save_mode // .retention_class)
+       elif ((.reason // \"\") | test(\"^(client-detached|queued)$\"))
+       then \"auto\"
+       else \"manual\"
+       end),
+      (.keep // .retention.keep // false | tostring),
+      (.imported // .source.imported // false | tostring)
+    ] | join(\"\t\")" "$1" 2>/dev/null || printf "0\tmanual\tfalse\tfalse")"
+    printf "%s\t%s\n" "$_epoch" "$1"
+  ' _ {} \
+  | while IFS=$'\t' read -r epoch snapshot_class keep_flag imported_flag manifest_path; do
+    case "$epoch" in ''|*[!0-9]*) epoch=0 ;; esac
+    if [ "$epoch" -le 0 ]; then
+      epoch="$(stat -c '%Y' "$manifest_path" 2>/dev/null || stat -f '%m' "$manifest_path" 2>/dev/null || printf '0')"
+    fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$epoch" "$snapshot_class" "$keep_flag" "$imported_flag" "$manifest_path"
   done | sort -t $'\t' -k1,1nr -k5,5r
 )"
