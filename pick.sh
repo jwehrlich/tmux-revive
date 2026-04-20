@@ -1403,7 +1403,9 @@ while :; do
       ;;
     ctrl-g)
       # Set pane shortcut — only works on pane rows
-      if [ "$kind" = "pane" ]; then
+      if [ "$kind" != "pane" ]; then
+        tmux display-message "Select a pane to set a shortcut" 2>/dev/null || true
+      else
         shortcut_slot="$(prompt_input "SET PANE SHORTCUT" "slot (1-9)" "" "Enter: set shortcut  Esc: cancel")" || true
         if [ -n "$shortcut_slot" ]; then
           case "$shortcut_slot" in

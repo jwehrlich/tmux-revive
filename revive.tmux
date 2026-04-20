@@ -122,6 +122,7 @@ tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Set session label"     l "run-shell '$_E $CURRENT_DIR/set-session-label.sh'" \
   "Save"                  s "run-shell -b '$_E $CURRENT_DIR/save-state.sh --reason manage-mode'" \
   "Restore latest"        R "run-shell -b '$_E $CURRENT_DIR/restore-state.sh --latest --yes'" \
+  "Pane shortcut 1-9"     "" "" \
   "Clear save lock"       x "run-shell -b '$_E $CURRENT_DIR/clear-save-lock.sh'" \
   "Check for updates"     u "run-shell -b '$_E $CURRENT_DIR/check-updates.sh --interactive'" \
   "Apply update"          U "run-shell -b '$_E $CURRENT_DIR/apply-updates.sh'" \
