@@ -1,5 +1,15 @@
 # tmux-revive Changelog
 
+## 2026-04-20 — Pane Shortcuts
+
+### New Feature
+
+- **Pane shortcuts (1–9)** — assign numbered bookmarks to any pane via
+  `Ctrl-g` in the picker. Jump to a bookmarked pane with `prefix m <N>`.
+  Shortcuts are per-server and persist across save/restore. Stored as
+  GUID + window/pane coordinates so they survive session renames and
+  snapshot restores.
+
 ## 2026-03-22 — Phase 8: Hardening, Upstream Parity, and Robustness
 
 Comprehensive audit and hardening pass comparing tmux-revive against

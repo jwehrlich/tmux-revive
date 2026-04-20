@@ -108,6 +108,13 @@ tmux bind-key -T revive u run-shell -b \
 tmux bind-key -T revive U run-shell -b \
   "$_E '$CURRENT_DIR/apply-updates.sh'"
 
+# Pane shortcuts (1-9)
+for _slot in 1 2 3 4 5 6 7 8 9; do
+  tmux bind-key -T revive "$_slot" run-shell -b \
+    "$_E '$CURRENT_DIR/pane-shortcut.sh' --jump $_slot"
+done
+unset _slot
+
 tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Revive picker"        m "display-popup -E -w 80% -h 70% '$_E $CURRENT_DIR/pick.sh'" \
   "Tree chooser"          t "choose-tree -Zw" \

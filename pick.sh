@@ -195,6 +195,7 @@ show_help() {
     "Windows & Panes" \
     "  ^w        Create new window" \
     "  ^p        Create new pane" \
+    "  ^g        Set pane shortcut (1-9)" \
     "" \
     "Snapshots (^b view)" \
     "  Enter     Action menu (Drill In, Restore," \
@@ -994,11 +995,11 @@ while :; do
       footer_lines="Enter: drill in  ^b: back  ^e: templates  ?: help  Esc: close"
     elif [ "$has_saved" = "true" ]; then
       footer_lines="Enter: jump/resume  ^a: restore all  ^r: rename  ^l: label"
-      footer_lines="$footer_lines"$'\n'"^t: +session  ^w: +window  ^p: +pane  ^d: delete"
+      footer_lines="$footer_lines"$'\n'"^t: +session  ^w: +window  ^p: +pane  ^g: shortcut  ^d: delete"
       footer_lines="$footer_lines"$'\n'"^b: snapshots  ^e: templates  ?: help  Esc: close"
     else
       footer_lines="Enter: jump  ^r: rename  ^l: label"
-      footer_lines="$footer_lines"$'\n'"^t: +session  ^w: +window  ^p: +pane  ^d: delete"
+      footer_lines="$footer_lines"$'\n'"^t: +session  ^w: +window  ^p: +pane  ^g: shortcut  ^d: delete"
       footer_lines="$footer_lines"$'\n'"^b: snapshots  ^e: templates  ?: help  Esc: close"
     fi
 
@@ -1010,7 +1011,7 @@ while :; do
       --footer-border=top
       --preview="$script_dir/preview-item.sh {1} {2} {3} {4} {5} $(printf '%q' "$pick_manifest_path") $(printf '%q' "$restore_state_cmd")"
       --preview-window='right:60%:wrap'
-      --expect=enter,ctrl-a,ctrl-b,ctrl-e,ctrl-l,ctrl-r,ctrl-p,ctrl-w,ctrl-t,ctrl-d,?
+      --expect=enter,ctrl-a,ctrl-b,ctrl-e,ctrl-g,ctrl-l,ctrl-r,ctrl-p,ctrl-w,ctrl-t,ctrl-d,?
     )
   fi
 
@@ -1397,6 +1398,50 @@ while :; do
             tmux set-option -t "$target_session_id" -q @tmux-revive-session-label "$new_label" 2>/dev/null || true
             "$script_dir/save-state.sh" --auto --reason set-session-label 2>/dev/null &
           fi
+        fi
+      fi
+      ;;
+    ctrl-g)
+      # Set pane shortcut — only works on pane rows
+      if [ "$kind" = "pane" ]; then
+        shortcut_slot="$(prompt_input "SET PANE SHORTCUT" "slot (1-9)" "" "Enter: set shortcut  Esc: cancel")" || true
+        if [ -n "$shortcut_slot" ]; then
+          case "$shortcut_slot" in
+            [1-9])
+              # Check if slot is already in use
+              _sc_runtime_dir="$(tmux_revive_runtime_dir)"
+              _sc_path="$_sc_runtime_dir/pane-shortcuts.json"
+              _sc_existing=""
+              if [ -f "$_sc_path" ]; then
+                _sc_existing="$(jq -r --arg s "$shortcut_slot" '.[$s] // empty' "$_sc_path" 2>/dev/null || true)"
+              fi
+              _sc_proceed="true"
+              if [ -n "$_sc_existing" ]; then
+                _sc_confirm="$(
+                  printf '%s\n' "Yes — overwrite" "No — cancel" |
+                    fzf \
+                      --prompt='confirm> ' \
+                      --header="$(header_text "SHORTCUT $shortcut_slot ALREADY SET")" \
+                      --header-first \
+                      --footer="Slot $shortcut_slot is already bound. Overwrite?" \
+                      --footer-border=top \
+                      "${TOKYO_FZF_COLORS[@]}" \
+                      --layout=reverse \
+                      --border \
+                      --no-info
+                )" || _sc_confirm="No — cancel"
+                if [[ "$_sc_confirm" != "Yes"* ]]; then
+                  _sc_proceed="false"
+                fi
+              fi
+              if [ "$_sc_proceed" = "true" ]; then
+                "$script_dir/pane-shortcut.sh" --set "$shortcut_slot" --pane-id "$id" 2>/dev/null || true
+              fi
+              ;;
+            *)
+              tmux display-message "Invalid slot: must be 1-9" 2>/dev/null || true
+              ;;
+          esac
         fi
       fi
       ;;

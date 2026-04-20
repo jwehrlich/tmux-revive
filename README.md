@@ -158,6 +158,7 @@ Press `?` inside the picker to show the full cheat sheet. Quick reference:
 | `Ctrl-d` | Delete session, snapshot, or template |
 | `Ctrl-w` | Create new window |
 | `Ctrl-p` | Create new pane |
+| `Ctrl-g` | Set pane shortcut (1–9) |
 | `?` | Show help cheat sheet |
 
 #### Snapshot action menu
@@ -180,6 +181,19 @@ Press `Enter` on a template row (toggle templates with `Ctrl-e` first):
 - **Export** — export the template as a portable `.tar.gz` bundle
 - **Rename** — rename the template (updates both filename and `name:` field)
 - **Duplicate** — copy to a new name
+
+#### Pane shortcuts
+
+Assign numbered shortcuts (1–9) to jump directly to any pane. In the
+picker, select a pane and press `Ctrl-g` to assign it to a slot. Then
+use `prefix m <number>` (e.g. `prefix m 3`) to jump to that pane
+instantly.
+
+- Shortcuts are per-server — each tmux server instance has its own set
+- Shortcuts persist across saves and restores via the snapshot manifest
+- If a shortcut's target no longer exists, a brief warning is shown
+- Use `pane-shortcut.sh --list` to see current shortcuts
+- Use `pane-shortcut.sh --clear <slot>` to remove a shortcut
 
 ## Save / Restore / Resume
 

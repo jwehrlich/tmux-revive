@@ -614,6 +614,21 @@ if [ "$save_paste_buffers" = "on" ]; then
   done < <(tmux list-buffers -F $'#{buffer_name}\t#{buffer_size}' 2>/dev/null || true)
 fi
 
+# Save pane shortcuts if they exist
+pane_shortcuts_json="{}"
+_pane_shortcuts_path="$runtime_dir/pane-shortcuts.json"
+if [ -f "$_pane_shortcuts_path" ]; then
+  _raw_shortcuts="$(jq '.' "$_pane_shortcuts_path" 2>/dev/null || printf '{}')"
+  if [ -n "$_raw_shortcuts" ] && [ "$_raw_shortcuts" != "null" ]; then
+    # Filter to only shortcuts whose session GUID is in this snapshot
+    pane_shortcuts_json="$(printf '%s\n' "$_raw_shortcuts" | jq --argjson sessions "$sessions_json" '
+      . as $shortcuts |
+      ($sessions | map(.session_guid) | map(select(. != null and . != ""))) as $guids |
+      to_entries | map(select(.value.session_guid as $g | $guids | index($g))) | from_entries
+    ' 2>/dev/null || printf '{}')"
+  fi
+fi
+
 jq -cn \
   --arg snapshot_version "1" \
   --arg created_at "$created_at" \
@@ -630,6 +645,7 @@ jq -cn \
   --arg save_mode "$([ "$auto_mode" = "true" ] && printf 'auto' || printf 'manual')" \
   --argjson sessions "$sessions_json" \
   --argjson paste_buffers "$paste_buffers_json" \
+  --argjson pane_shortcuts "$pane_shortcuts_json" \
   '{
     snapshot_version: $snapshot_version,
     created_at: $created_at,
@@ -645,7 +661,8 @@ jq -cn \
     reason: $reason,
     save_mode: $save_mode,
     sessions: $sessions,
-    paste_buffers: $paste_buffers
+    paste_buffers: $paste_buffers,
+    pane_shortcuts: $pane_shortcuts
   }' >"$tmp_dir/manifest.json"
 
 if ! mv "$tmp_dir" "$snapshot_dir"; then

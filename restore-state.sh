@@ -823,6 +823,12 @@ finish_restore_success() {
   report_path="$latest_restore_report_path"
 
   run_post_restore_hook "$attach_target" "$restored_count" "$report_path"
+
+  # Restore pane shortcuts from the manifest
+  if [ -n "$manifest_path" ] && [ -f "$manifest_path" ]; then
+    "$script_dir/pane-shortcut.sh" --load-from-manifest "$manifest_path" 2>/dev/null || true
+  fi
+
   tmux_notice "$(append_restore_log_path "$summary")"
   maybe_cleanup_transient_session "$attach_target"
   maybe_show_restore_report_popup "$report_path"
