@@ -235,7 +235,7 @@ EOF
   nvim --server "$nvim_socket" --remote-expr "execute('call cursor(12,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket" 'line(".")' "12" || fail "headless nvim did not move cursor in time for history test"
 
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
   "$save_state" --reason test-restored-nvim-history
   rm -f "$TMUX_TEST_NVIM_RESTORE_LOG"
 

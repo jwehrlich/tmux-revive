@@ -747,6 +747,43 @@ Neovim panes:
 - restore file-backed tabs/windows, cwd, current tab/window, and cursor positions for supported clean sessions
 - do not restore non-file buffers, terminal buffers, quickfix/location lists, or dirty buffers
 
+### Neovim Integration Setup
+
+tmux-revive ships a Lua module that enables full nvim session persistence:
+
+1. **Add to your `init.lua`** (before any `require("core.send_to_nvim")`):
+
+```lua
+-- Add tmux-revive's nvim integration to runtimepath
+local tmux_revive_nvim = vim.fn.expand("~/.tmux/plugins/tmux-revive/nvim")
+if vim.fn.isdirectory(tmux_revive_nvim) == 1 then
+  vim.opt.rtp:prepend(tmux_revive_nvim)
+end
+require("core.send_to_nvim").setup()
+```
+
+2. **What it does:**
+
+| Feature | Description |
+|---------|-------------|
+| tmux-revive save/restore | Snapshots nvim state (tabs, splits, cursors) during `prefix + S`; restores on `prefix + R` |
+| Periodic auto-save | Writes session state every 60s to `~/.local/state/nvim/sessions/` |
+| Crash recovery | If nvim crashes, reopening in the same tmux pane auto-restores state |
+| Cwd-based fallback | Opening nvim in a directory with a saved session auto-restores it |
+| Multiple instances | Each instance is tracked by PID; sessions never collide |
+| Cleanup | Stale sessions (dead PID + >7 days for cwd) are swept on startup |
+
+3. **Restore priority chain** (checked in order on startup):
+   1. `TMUX_NVIM_RESTORE_STATE` env var set → tmux-revive is restoring, use that
+   2. Pane-keyed session exists + owning PID is dead → nvim crashed, auto-restore
+   3. Cwd-keyed session exists + owning PID is dead → auto-restore
+   4. None found → start fresh
+
+4. **Skipped when:** nvim is opened with explicit file arguments (e.g. `nvim foo.lua`)
+
+5. **Commands:**
+   - `:DiffRecovered` — open diff views for dirty buffers that were recovered during restore
+
 Approved auto-restart commands are intentionally conservative. Today that includes command families such as:
 - `tail -f` / `tail -F`
 - `make ...`

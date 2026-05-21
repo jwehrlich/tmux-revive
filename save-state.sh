@@ -366,7 +366,7 @@ build_pane_snapshot() {
 
   nvim_state_ref=""
   local pane_nvim_capture="$tmp_dir/nvim-state-path-${pane_id}.txt"
-  if "$script_dir/../tmux/send_to_nvim/snapshot-nvim-state.sh" "$pane_id" "$tmp_dir/nvim/$pane_id" >"$pane_nvim_capture" 2>/dev/null; then
+  if "$script_dir/send_to_nvim/snapshot-nvim-state.sh" "$pane_id" "$tmp_dir/nvim/$pane_id" >"$pane_nvim_capture" 2>/dev/null; then
     nvim_state_ref="$(to_snapshot_path "$(cat "$pane_nvim_capture")")"
     rm -f "$pane_nvim_capture"
     nvim_registry_cwd="$(nvim_registry_cwd_for_pane "$session_id" "$pane_id" || true)"

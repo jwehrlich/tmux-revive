@@ -54,7 +54,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket_0" 'expand("%:p")' "$nvim_file_session0" || fail "nvim for session 0 did not start"
   nvim --server "$nvim_socket_0" --remote-expr "execute('call cursor(15,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_0" 'line(".")' "15" || fail "nvim cursor did not move to line 15"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$session0_pane1" "$nvim_socket_0" "$nvim_pid_0" "$sample_dir"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$session0_pane1" "$nvim_socket_0" "$nvim_pid_0" "$sample_dir"
 
   # Split pane and run ls
   tmux split-window -h -t "$s0_first_window" -c "$sample_dir"
@@ -109,7 +109,7 @@ EXPECT_EOF
   wait_for_nvim_expr "$nvim_socket_foo" 'expand("%:p")' "$nvim_file_session_foo" || fail "nvim for session foo did not start"
   nvim --server "$nvim_socket_foo" --remote-expr "execute('call cursor(10,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_foo" 'line(".")' "10" || fail "nvim cursor did not move to line 10 in foo"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$foo_pane" "$nvim_socket_foo" "$nvim_pid_foo" "$sample_dir"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$foo_pane" "$nvim_socket_foo" "$nvim_pid_foo" "$sample_dir"
 
   # ── Step 7: Save via bind+S again ───────────────────────────────────
   rm -f "$latest_path"

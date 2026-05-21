@@ -43,7 +43,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket" 'expand("%:p")' "$file_c" || fail "headless nvim did not open second tab file in time"
   wait_for_nvim_expr "$nvim_socket" 'line(".")' "5" || fail "headless nvim did not move second tab cursor to line 5"
 
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
   "$save_state" --reason test-nvim-restore
   manifest="$(latest_manifest)"
   nvim_state_ref="$(jq -r '.sessions[0].windows[0].panes[0].nvim_state_ref' "$manifest")"
@@ -164,7 +164,7 @@ EOF
   wait_for_nvim_expr "$nvim_socket" 'expand("%:p")' "$file_c" || fail "headless nvim did not open second tab file in time"
   wait_for_nvim_expr "$nvim_socket" 'line(".")' "5" || fail "headless nvim did not move second tab cursor to line 5"
 
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$pane_id" "$nvim_socket" "$nvim_pid" "$(dirname "$file_a")"
   "$save_state" --reason test-nvim-tmux-restore
   rm -f "$TMUX_TEST_NVIM_RESTORE_LOG"
 

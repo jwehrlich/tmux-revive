@@ -230,7 +230,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket_one" 'expand("%:p")' "$start_file" || fail "window1 pane1 nvim did not open start file"
   nvim --server "$nvim_socket_one" --remote-expr "execute('call cursor(9,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_one" 'line(".")' "9" || fail "window1 pane1 nvim did not move to line 9"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$window1_pane1" "$nvim_socket_one" "$nvim_pid_one" "$start_dir"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$window1_pane1" "$nvim_socket_one" "$nvim_pid_one" "$start_dir"
 
   "$real_nvim" --headless -u NONE -i NONE \
     --cmd "lua package.path = package.path .. ';$repo_root/nvim/lua/?.lua;$repo_root/nvim/lua/?/init.lua'" \
@@ -239,7 +239,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket_two" 'expand("%:p")' "$other_file" || fail "window2 pane1 nvim did not open other file"
   nvim --server "$nvim_socket_two" --remote-expr "execute('call cursor(6,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_two" 'line(".")' "6" || fail "window2 pane1 nvim did not move to line 6"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$window2_pane1" "$nvim_socket_two" "$nvim_pid_two" "$nvim_dir"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$window2_pane1" "$nvim_socket_two" "$nvim_pid_two" "$nvim_dir"
 
   tmux send-keys -t "$window1_pane2" "cd $(printf '%q' "$tail_dir") && tail -f $(printf '%q' "$tail_file")" C-m
   wait_for_pane_command "$window1_pane2" tail 60 0.25 || fail "window1 pane2 did not start tail before save"
@@ -351,7 +351,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket_one" 'expand("%:p")' "$file_alpha" || fail "window1 pane1 nvim did not open alpha file"
   nvim --server "$nvim_socket_one" --remote-expr "execute('call cursor(12,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_one" 'line(".")' "12" || fail "window1 pane1 nvim did not move to line 12"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$window1_pane1" "$nvim_socket_one" "$nvim_pid_one" "$dir_alpha"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$window1_pane1" "$nvim_socket_one" "$nvim_pid_one" "$dir_alpha"
 
   "$real_nvim" --headless -u NONE -i NONE \
     --cmd "lua package.path = package.path .. ';$repo_root/nvim/lua/?.lua;$repo_root/nvim/lua/?/init.lua'" \
@@ -360,7 +360,7 @@ teardown() {
   wait_for_nvim_expr "$nvim_socket_two" 'expand("%:p")' "$file_gamma" || fail "window2 pane1 nvim did not open gamma file"
   nvim --server "$nvim_socket_two" --remote-expr "execute('call cursor(7,1)')" >/dev/null
   wait_for_nvim_expr "$nvim_socket_two" 'line(".")' "7" || fail "window2 pane1 nvim did not move to line 7"
-  "$repo_root/tmux/send_to_nvim/register_nvim_instance.sh" "$window2_pane1" "$nvim_socket_two" "$nvim_pid_two" "$dir_gamma"
+  "$repo_root/send_to_nvim/register_nvim_instance.sh" "$window2_pane1" "$nvim_socket_two" "$nvim_pid_two" "$dir_gamma"
 
   tmux send-keys -t "$window1_pane2" "cd $(printf '%q' "$dir_beta") && tail -f $(printf '%q' "$file_beta")" C-m
   wait_for_pane_command "$window1_pane2" tail 60 0.25 || fail "window1 pane2 did not start tail before save"
