@@ -131,15 +131,18 @@ EOF
   exit 0
 }
 
-# Build sorted registry in a single pass with Perl (replaces jq+awk per file + sort)
+# Build sorted registry for this tmux window in a single pass with Perl
+# (replaces jq+awk per file + sort).
 registry_data="$(
   perl -MJSON::PP -e '
+    my $src_window = shift @ARGV;
     my @entries;
     for my $file (@ARGV) {
       open my $fh, "<", $file or next;
       my $json = do { local $/; <$fh> };
       close $fh;
       my $d = eval { decode_json($json) } or next;
+      next unless ($d->{window_id} // "") eq $src_window;
       push @entries, join("\t",
         $d->{last_active_epoch} // 0,
         $d->{pane_id}  // "",
@@ -151,11 +154,11 @@ registry_data="$(
     # Sort by epoch descending
     print join("\n", sort { (split /\t/, $b)[0] <=> (split /\t/, $a)[0] } @entries), "\n"
       if @entries;
-  ' "$session_dir"/*.json 2>/dev/null
+  ' "$src_window" "$session_dir"/*.json 2>/dev/null
 )" || true
 
 [ -n "$registry_data" ] || {
-  status_err "No nvim session found"
+  status_err "No nvim session found in current window"
   exit 0
 }
 
@@ -172,6 +175,7 @@ _target_basename="$(basename -- "$absolute_target")"
 
 while IFS="$(printf '\t')" read -r _last_active target_pane target_window target_server entry_path; do
   [ -n "$target_pane" ] || continue
+  [ "$target_window" = "$src_window" ] || continue
 
   # Check pane exists
   tmux display-message -p -t "$target_pane" '#{pane_id}' >/dev/null 2>&1 || {

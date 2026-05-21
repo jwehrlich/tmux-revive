@@ -202,6 +202,112 @@ EOF
   restore_test_shell_env
 }
 
+@test "ctrl-click opens file in most recent nvim for current window" {
+  sample_dir="$(cd "$case_root" && pwd -P)"
+  target_file="$sample_dir/target.txt"
+  open_log="$case_root/nvim-open.log"
+
+  seq 1 10 >"$target_file"
+
+  tmux new-session -d -s work -c "$sample_dir" "printf 'target.txt:3\n'; sleep 60"
+  source_pane="$(tmux list-panes -t work -F '#{pane_id}' | head -n 1)"
+  source_window="$(tmux display-message -p -t "$source_pane" '#{window_id}')"
+  current_old_pane="$(tmux split-window -d -P -F '#{pane_id}' -t "$source_pane" -c "$sample_dir" 'sleep 60')"
+  current_new_pane="$(tmux split-window -d -P -F '#{pane_id}' -t "$source_pane" -c "$sample_dir" 'sleep 60')"
+  other_window="$(tmux new-window -d -P -F '#{window_id}' -t work: -c "$sample_dir" 'sleep 60')"
+  other_pane="$(tmux list-panes -t "$other_window" -F '#{pane_id}' | head -n 1)"
+
+  session_id="$(tmux display-message -p -t "$source_pane" '#{session_id}')"
+  session_dir="$TMUX_SEND_TO_NVIM_STATE_DIR/$session_id"
+  mkdir -p "$session_dir"
+
+  write_registry_entry() {
+    local pane_id="$1"
+    local window_id="$2"
+    local server="$3"
+    local pid="$4"
+    local epoch="$5"
+
+    jq -n \
+      --arg session_id "$session_id" \
+      --arg window_id "$window_id" \
+      --arg pane_id "$pane_id" \
+      --arg nvim_pid "$pid" \
+      --arg server "$server" \
+      --arg cwd "$sample_dir" \
+      --argjson last_active_epoch "$epoch" \
+      '{
+        session_id: $session_id,
+        window_id: $window_id,
+        pane_id: $pane_id,
+        nvim_pid: $nvim_pid,
+        server: $server,
+        cwd: $cwd,
+        last_active_epoch: $last_active_epoch
+      }' >"$session_dir/$pane_id-$pid.json"
+  }
+
+  write_registry_entry "$current_old_pane" "$source_window" "current-old" "101" "100"
+  write_registry_entry "$current_new_pane" "$source_window" "current-new" "102" "300"
+  write_registry_entry "$other_pane" "$other_window" "other-newer" "201" "999"
+
+  cat >"$case_root/bin/nvim" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "\${1:-}" = "--server" ]; then
+  server="\$2"
+  shift 2
+  case "\${1:-}" in
+    --remote-expr)
+      exit 0
+      ;;
+    --remote-send)
+      printf '%s\t%s\n' "\$server" "\${2:-}" >>"\${TMUX_TEST_NVIM_OPEN_LOG:?}"
+      exit 0
+      ;;
+  esac
+fi
+exec "$real_nvim" "\$@"
+EOF
+  chmod +x "$case_root/bin/nvim"
+
+  cat >"$case_root/bin/tmux" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "\${TMUX_TEST_COMMAND_LOG:-}" ]; then
+  printf '%s\n' "\$*" >>"\$TMUX_TEST_COMMAND_LOG"
+fi
+if [ "\${1:-}" = "display-message" ]; then
+  has_client=0
+  prints=0
+  for arg in "\$@"; do
+    [ "\$arg" = "-c" ] && has_client=1
+    [ "\$arg" = "-p" ] && prints=1
+  done
+  if [ "\$has_client" = "1" ]; then
+    [ "\$prints" = "1" ] && printf '%s\n' "\${TMUX_TEST_CURRENT_PANE:-}"
+    exit 0
+  fi
+fi
+if [ "\${1:-}" = "switch-client" ] && [ -n "\${TMUX_TEST_SWITCH_LOG:-}" ]; then
+  printf '%s\n' "\$*" >>"\$TMUX_TEST_SWITCH_LOG"
+  exit 0
+fi
+exec "$real_tmux" -f /dev/null -L "$socket_name" "\$@"
+EOF
+  chmod +x "$case_root/bin/tmux"
+
+  TMUX_TEST_NVIM_OPEN_LOG="$open_log" \
+    TMUX_TEST_CURRENT_PANE="$source_pane" \
+    "$repo_root/send_to_nvim/open_clicked_path.sh" "$source_pane" 4 0 "/dev/ttys-test"
+
+  selected_server="$(cut -f1 "$open_log")"
+  switch_target="$(awk '{ print $NF }' "$TMUX_TEST_SWITCH_LOG" | tail -n 1)"
+
+  assert_eq "current-new" "$selected_server" "selected nvim server"
+  assert_eq "$current_new_pane" "$switch_target" "selected nvim pane"
+}
+
 @test "nvim persistence policy" {
   file_path="$case_root/persist.txt"
   echo "one" >"$file_path"
