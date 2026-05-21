@@ -195,7 +195,7 @@ show_help() {
     "Windows & Panes" \
     "  ^w        Create new window" \
     "  ^p        Create new pane" \
-    "  ^g        Set pane shortcut (1-9)" \
+    "  ^g        Set pane shortcut (0-9)" \
     "" \
     "Snapshots (^b view)" \
     "  Enter     Action menu (Drill In, Restore," \
@@ -1406,10 +1406,10 @@ while :; do
       if [ "$kind" != "pane" ]; then
         tmux display-message "Select a pane to set a shortcut" 2>/dev/null || true
       else
-        shortcut_slot="$(prompt_input "SET PANE SHORTCUT" "slot (1-9)" "" "Enter: set shortcut  Esc: cancel")" || true
+        shortcut_slot="$(prompt_input "SET PANE SHORTCUT" "slot (0-9)" "" "Enter: set shortcut  Esc: cancel")" || true
         if [ -n "$shortcut_slot" ]; then
           case "$shortcut_slot" in
-            [1-9])
+            [0-9])
               # Check if slot is already in use
               _sc_runtime_dir="$(tmux_revive_runtime_dir)"
               _sc_path="$_sc_runtime_dir/pane-shortcuts.json"
@@ -1441,7 +1441,7 @@ while :; do
               fi
               ;;
             *)
-              tmux display-message "Invalid slot: must be 1-9" 2>/dev/null || true
+              tmux display-message "Invalid slot: must be 0-9" 2>/dev/null || true
               ;;
           esac
         fi

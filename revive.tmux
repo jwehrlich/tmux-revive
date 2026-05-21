@@ -108,12 +108,14 @@ tmux bind-key -T revive u run-shell -b \
 tmux bind-key -T revive U run-shell -b \
   "$_E '$CURRENT_DIR/apply-updates.sh'"
 
-# Pane shortcuts (1-9)
-for _slot in 1 2 3 4 5 6 7 8 9; do
+# Pane shortcuts (0-9)
+for _slot in 0 1 2 3 4 5 6 7 8 9; do
   tmux bind-key -T revive "$_slot" run-shell -b \
     "$_E '$CURRENT_DIR/pane-shortcut.sh' --jump $_slot"
 done
 unset _slot
+tmux bind-key -T revive C run-shell -b \
+  "$_E '$CURRENT_DIR/pane-shortcut.sh' --toggle-carousel --client-tty #{q:client_tty}"
 
 tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Revive picker"        m "display-popup -E -w 80% -h 70% '$_E $CURRENT_DIR/pick.sh'" \
@@ -122,7 +124,8 @@ tmux bind-key -T revive '?' display-menu -T "tmux-revive" \
   "Set session label"     l "run-shell '$_E $CURRENT_DIR/set-session-label.sh'" \
   "Save"                  s "run-shell -b '$_E $CURRENT_DIR/save-state.sh --reason manage-mode'" \
   "Restore latest"        R "run-shell -b '$_E $CURRENT_DIR/restore-state.sh --latest --yes'" \
-  "Pane shortcut 1-9"     "" "" \
+  "Pane shortcuts 0-9"    "" "" \
+  "Rotate shortcuts"      C "run-shell -b '$_E $CURRENT_DIR/pane-shortcut.sh --toggle-carousel --client-tty #{q:client_tty}'" \
   "Clear save lock"       x "run-shell -b '$_E $CURRENT_DIR/clear-save-lock.sh'" \
   "Check for updates"     u "run-shell -b '$_E $CURRENT_DIR/check-updates.sh --interactive'" \
   "Apply update"          U "run-shell -b '$_E $CURRENT_DIR/apply-updates.sh'" \

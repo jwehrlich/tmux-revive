@@ -66,6 +66,9 @@ set -g @tmux-revive-save-key 'S'
 set -g @tmux-revive-restore-key 'R'
 set -g @tmux-revive-manage-key 'm'
 
+# Shortcut carousel (seconds between rotations)
+set -g @tmux-revive-shortcut-carousel-interval '10'
+
 # Data directory (default: ~/.tmux/data or ~/.config/tmux/data)
 # set -g @tmux-revive-data-dir '~/.tmux/data'
 
@@ -129,6 +132,8 @@ From manage mode:
 - `r`: open the saved-session chooser
 - `b`: browse saved snapshots
 - `l`: set the current session label
+- `0`–`9`: jump to a pane shortcut
+- `C`: start or stop the pane shortcut carousel
 - `s`: save
 - `R`: restore latest
 - `?`: show the manage menu
@@ -158,7 +163,7 @@ Press `?` inside the picker to show the full cheat sheet. Quick reference:
 | `Ctrl-d` | Delete session, snapshot, or template |
 | `Ctrl-w` | Create new window |
 | `Ctrl-p` | Create new pane |
-| `Ctrl-g` | Set pane shortcut (1–9) |
+| `Ctrl-g` | Set pane shortcut (0–9) |
 | `?` | Show help cheat sheet |
 
 #### Snapshot action menu
@@ -184,7 +189,7 @@ Press `Enter` on a template row (toggle templates with `Ctrl-e` first):
 
 #### Pane shortcuts
 
-Assign numbered shortcuts (1–9) to jump directly to any pane. In the
+Assign numbered shortcuts (0–9) to jump directly to any pane. In the
 picker, select a pane and press `Ctrl-g` to assign it to a slot. Then
 use `prefix m <number>` (e.g. `prefix m 3`) to jump to that pane
 instantly.
@@ -192,6 +197,8 @@ instantly.
 - Shortcuts are per-server — each tmux server instance has its own set
 - Shortcuts persist across saves and restores via the snapshot manifest
 - If a shortcut's target no longer exists, a brief warning is shown
+- Use `prefix m C` or **Rotate shortcuts** from the manage menu to start or stop a rotating shortcut carousel
+- Set `@tmux-revive-shortcut-carousel-interval` (seconds, default `10`) to control the rotation speed
 - Use `pane-shortcut.sh --list` to see current shortcuts
 - Use `pane-shortcut.sh --clear <slot>` to remove a shortcut
 

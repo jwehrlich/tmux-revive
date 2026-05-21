@@ -1,5 +1,18 @@
 # tmux-revive Changelog
 
+## 2026-05-12 — Shortcut Carousel
+
+### New Features
+
+- **Shortcut carousel toggle** — `prefix m C` now starts and stops a
+  rotating carousel across all live pane shortcuts, and the same action
+  is available from the tmux-revive manage menu as **Rotate shortcuts**.
+- **Shortcut slot 0 support** — pane shortcuts now cover `0–9` instead
+  of `1–9`, including picker prompts, manage-mode bindings, and
+  manifest restore.
+- **Configurable carousel speed** — `@tmux-revive-shortcut-carousel-interval`
+  controls the seconds between carousel rotations.
+
 ## 2026-04-20 — Pane Shortcuts
 
 ### New Feature
