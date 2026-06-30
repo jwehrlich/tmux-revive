@@ -45,13 +45,18 @@ jobs:
       - name: Run core test suite
         run: bash tests/test_restore_stack.sh all
 
-      - name: Run template test suite
-        run: bats tests/templates.bats
-
-      - name: Run nvim persistence + autosave-leak + watchdog suites
-        run: >-
-          bats
-          tests/nvim.bats
-          tests/nvim_persistence.bats
-          tests/nvim_autosave_leak.bats
-          tests/nvim_health_check.bats
+      - name: Run bats suite
+        # Run each file in its own bats process. Running the whole suite in one
+        # process (bats tests/*.bats) accumulates tmux servers and headless nvim
+        # instances across 290+ tests and can exhaust resources / hang. Reap
+        # leaked headless nvims between files. Continue past failures so every
+        # file's result is reported, then fail the job if any file failed.
+        run: |
+          rc=0
+          for f in tests/*.bats; do
+            echo "::group::$f"
+            pkill -9 -f 'nvim --headless' 2>/dev/null || true
+            bats "$f" || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc

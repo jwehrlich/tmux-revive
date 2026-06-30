@@ -7,9 +7,16 @@ setup() {
   load test_helper/shell-env-helpers
   _common_setup
   _setup_case
+  # Short socket dir: $case_root is deep enough that "$case_root/windowN.sock"
+  # exceeds the unix sun_path limit (104 on macOS, 108 on Linux). nvim --listen
+  # then silently fails, and both window sockets truncate to the same prefix and
+  # collide. Keep nvim listen sockets under a short path instead.
+  nvim_sock_dir="/tmp/trv-rl.$$"
+  mkdir -p "$nvim_sock_dir"
 }
 
 teardown() {
+  [ -n "${nvim_sock_dir:-}" ] && rm -rf "$nvim_sock_dir"
   _teardown_case
 }
 
@@ -199,8 +206,8 @@ teardown() {
   start_file="$start_dir/start.txt"
   tail_file="$tail_dir/backtrace.log"
   other_file="$nvim_dir/other.txt"
-  nvim_socket_one="$case_root/window1-pane1.sock"
-  nvim_socket_two="$case_root/window2-pane1.sock"
+  nvim_socket_one="$nvim_sock_dir/w1.sock"
+  nvim_socket_two="$nvim_sock_dir/w2.sock"
 
   mkdir -p "$start_dir" "$tail_dir" "$nvim_dir" "$ls_dir"
   setup_test_zsh_env "$zdotdir" ': 1700000000:0;echo two-window-layout-history'
@@ -317,8 +324,8 @@ teardown() {
   file_beta="$dir_beta/beta.log"
   file_gamma="$dir_gamma/gamma.txt"
   file_delta="$dir_delta/delta.log"
-  nvim_socket_one="$case_root/window1-pane1.sock"
-  nvim_socket_two="$case_root/window2-pane1.sock"
+  nvim_socket_one="$nvim_sock_dir/w1.sock"
+  nvim_socket_two="$nvim_sock_dir/w2.sock"
 
   mkdir -p "$dir_alpha" "$dir_beta" "$dir_gamma" "$dir_delta"
   setup_test_zsh_env "$zdotdir" ': 1700000000:0;echo mixed-session-history'

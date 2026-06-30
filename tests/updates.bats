@@ -21,6 +21,13 @@ teardown() {
 # ── Helpers ──────────────────────────────────────────────────────────
 
 _setup_git_repos() {
+  # Isolate from the developer's global/system git config. Without this, a global
+  # commit.gpgsign=true (e.g. SSH signing via 1Password) makes every test commit
+  # fail with exit 128. CI has no global config, but this keeps the suite green
+  # on developer machines too.
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
   # Bare remote repo simulating GitHub origin
   remote_repo="$case_root/remote.git"
   git init --bare "$remote_repo" >/dev/null 2>&1
@@ -344,10 +351,6 @@ _run_apply() {
 
   # Replace check-updates.sh with a sentinel that proves it was called
   local sentinel="$case_root/check-updates-called"
-  cat >"$tmux_revive_dir/check-updates.sh.bak" <<'EOF'
-#!/usr/bin/env bash
-touch "$1"
-EOF
   cat >"$case_root/bin/check-updates-sentinel" <<EOF
 #!/usr/bin/env bash
 touch "$sentinel"
