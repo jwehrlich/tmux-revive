@@ -236,6 +236,21 @@ local function summarize_unsupported_state(state)
   return parts
 end
 
+-- Collapse a list of restore-limitation messages into a single, length-bounded
+-- line. Embedded newlines are the strongest trigger for nvim's hit-enter prompt
+-- (which freezes an unattended background pane), so they are flattened; the
+-- length is bounded only to stop a pathological concatenation from becoming a
+-- huge multi-screen message. The leak itself is prevented structurally by the
+-- self-rearming autosave timer — this just keeps the warning well-behaved while
+-- preserving the detail (dirty buffers, quickfix list, …) the user needs.
+local function clamp_restore_summary(messages, max_len)
+  max_len = max_len or 300
+  local summary = ("send_to_nvim: restored file-backed state only; " ..
+    table.concat(messages, "; ")):gsub("%s+", " ")
+  if #summary > max_len then summary = summary:sub(1, max_len - 3) .. "..." end
+  return summary
+end
+
 local function notify_restore_limits(state)
   local messages = {}
   local dirty_buffers = state.dirty_buffers or {}
@@ -263,7 +278,7 @@ local function notify_restore_limits(state)
 
   if #messages > 0 then
     vim.schedule(function()
-      vim.notify("send_to_nvim: restored file-backed state only; " .. table.concat(messages, "; "), vim.log.levels.WARN)
+      vim.notify(clamp_restore_summary(messages), vim.log.levels.WARN)
     end)
   end
 end
@@ -300,10 +315,60 @@ local function autosave_session()
   end
 end
 
-local function start_autosave_timer()
+-- Autosave pacing (env-overridable; matches TMUX_MANAGE_* convention).
+-- The delay before each save is set proportional to how long the *previous*
+-- save took, clamped to [min, max], so cheap saves stay frequent while a heavy
+-- session backs off automatically. Overhead targets ~1/autosave_overhead of
+-- wall-clock spent saving.
+local function env_secs(name, default)
+  local v = tonumber(vim.env[name] or "")
+  return (v and v > 0) and v or default
+end
+
+-- Append a diagnostic line to TMUX_MANAGE_NVIM_LOG when set. Off by default, and
+-- a plain file append — never an echo/notify — so it cannot raise the hit-enter
+-- prompt that this whole subsystem is hardened against.
+local function log_debug(msg)
+  local path = vim.env.TMUX_MANAGE_NVIM_LOG
+  if not path or path == "" then return end
+  pcall(function()
+    local fh = io.open(path, "a")
+    if not fh then return end
+    fh:write(os.date("!%Y-%m-%dT%H:%M:%SZ ") .. msg .. "\n")
+    fh:close()
+  end)
+end
+local autosave_min_ms   = env_secs("TMUX_MANAGE_NVIM_AUTOSAVE_MIN_SECS", 60) * 1000
+local autosave_max_ms   = env_secs("TMUX_MANAGE_NVIM_AUTOSAVE_MAX_SECS", 600) * 1000
+local autosave_overhead = 50
+
+local function next_autosave_ms(last_ms)
+  return math.max(autosave_min_ms, math.min(autosave_max_ms, last_ms * autosave_overhead))
+end
+
+-- run_fn is an optional injection seam for tests; production passes nothing and
+-- the real autosave_session is used.
+local function start_autosave_timer(run_fn)
   if autosave_timer then return end
+  run_fn = run_fn or autosave_session
   autosave_timer = vim.uv.new_timer()
-  autosave_timer:start(60000, 60000, vim.schedule_wrap(autosave_session))
+  -- Self-rearming one-shot timer: the next countdown begins only after the
+  -- previous save has actually run, so a busy/wedged main loop can never stack
+  -- events on the multiqueue (the cause of the multi-GB leak). pcall + the
+  -- unconditional re-arm keep the loop alive even if a save throws.
+  local function arm(delay_ms)
+    if not autosave_timer then return end -- stopped; don't re-arm
+    autosave_timer:start(delay_ms, 0, function()
+      vim.schedule(function()
+        if not autosave_timer then return end -- stopped between fire and now; no stray save, no re-arm
+        local t0 = vim.uv.hrtime()
+        local ok, err = pcall(run_fn)
+        if not ok then log_debug("autosave run failed: " .. tostring(err)) end
+        arm(next_autosave_ms((vim.uv.hrtime() - t0) / 1e6))
+      end)
+    end)
+  end
+  arm(autosave_min_ms)
 end
 
 local function stop_autosave_timer()
@@ -1004,5 +1069,14 @@ function M.setup()
     callback = initialize,
   })
 end
+
+-- Internals exposed for tests/*.bats only. Not part of the public API.
+M.__test = {
+  next_autosave_ms      = next_autosave_ms,
+  env_secs              = env_secs,
+  clamp_restore_summary = clamp_restore_summary,
+  start_autosave_timer  = start_autosave_timer,
+  stop_autosave_timer   = stop_autosave_timer,
+}
 
 return M

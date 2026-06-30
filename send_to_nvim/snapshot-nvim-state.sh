@@ -33,7 +33,9 @@ nvim_pid=$!
 elapsed=0
 while kill -0 "$nvim_pid" 2>/dev/null; do
   if [ "$elapsed" -ge "$nvim_timeout" ]; then
-    kill "$nvim_pid" 2>/dev/null
+    # SIGKILL, not SIGTERM: a client blocked in a --remote-expr RPC against a
+    # wedged nvim server ignores SIGTERM, so plain `kill` leaks the process.
+    kill -9 "$nvim_pid" 2>/dev/null
     wait "$nvim_pid" 2>/dev/null || true
     exit 1
   fi
