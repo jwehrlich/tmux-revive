@@ -73,6 +73,10 @@ set -g @tmux-revive-manage-key 'm'
 set -g @tmux-revive-autosave 'on'
 set -g @tmux-revive-autosave-interval '900'
 
+# Neovim watchdog: reap wedged/ballooning persistence servers (see below)
+set -g @tmux-revive-nvim-watchdog 'on'
+set -g @tmux-revive-nvim-watchdog-interval '300'
+
 # Startup restore: 'prompt', 'auto', or 'off'
 set -g @tmux-revive-startup-restore 'prompt'
 
@@ -102,6 +106,32 @@ Override the state root with `@tmux-revive-data-dir` in `.tmux.conf` or
 For deeper details, see:
 - [workflow.md](workflow.md)
 - [known-limitations.md](known-limitations.md)
+
+### Neovim persistence watchdog
+
+Long-lived Neovim persistence servers can, in rare cases, wedge — e.g. parked at
+a hit-enter prompt on an unattended background pane — and then accumulate memory
+without bound. The watchdog runs periodically (driven by the autosave tick) and
+reaps any server that has been unresponsive across several consecutive checks, or
+whose memory footprint exceeds a ceiling. Stale registry entries (dead pid) are
+swept too.
+
+| tmux option | Default | Purpose |
+|-------------|---------|---------|
+| `@tmux-revive-nvim-watchdog` | `on` | Enable/disable the watchdog |
+| `@tmux-revive-nvim-watchdog-interval` | `300` | Minimum seconds between watchdog passes |
+
+Finer tuning is available via environment variables (read by the nvim helpers):
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `TMUX_MANAGE_NVIM_HEALTH_FAILS` | `3` | Consecutive unresponsive checks before reaping |
+| `TMUX_MANAGE_NVIM_HEALTH_PING_TIMEOUT` | `5` | Per-check RPC ping timeout (seconds) |
+| `TMUX_MANAGE_NVIM_FOOTPRINT_CEILING_MB` | `4096` | Reap a server above this footprint; `0` disables |
+| `TMUX_MANAGE_NVIM_AUTOSAVE_MIN_SECS` | `60` | Floor for the adaptive autosave interval |
+| `TMUX_MANAGE_NVIM_AUTOSAVE_MAX_SECS` | `600` | Ceiling for the adaptive autosave interval |
+| `TMUX_MANAGE_NVIM_SNAPSHOT_TIMEOUT` | `5` | Timeout for a per-pane state snapshot RPC (seconds) |
+| `TMUX_MANAGE_NVIM_LOG` | _(unset)_ | If set, append autosave failures to this file |
 
 ## Daily Commands
 

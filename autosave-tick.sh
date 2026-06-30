@@ -39,6 +39,27 @@ esac
 
 last_auto_path="$(tmux_revive_last_auto_save_path)"
 last_save_notice_path="$(tmux_revive_last_save_notice_path)"
+
+# nvim watchdog: periodically reap wedged/ballooning persistence servers. Rate-
+# limited to once per watchdog interval (this tick runs on every status refresh)
+# and backgrounded so it never delays status rendering.
+watchdog_enabled="$(tmux show-option -gqv '@tmux-revive-nvim-watchdog' 2>/dev/null || printf 'on')"
+if [ "$watchdog_enabled" != "off" ]; then
+  watchdog_interval="$(tmux show-option -gqv '@tmux-revive-nvim-watchdog-interval' 2>/dev/null || printf '300')"
+  case "$watchdog_interval" in ''|*[!0-9]*) watchdog_interval=300 ;; esac
+  wd_last_path="$(dirname "$last_auto_path")/nvim-watchdog-last"
+  wd_last=0
+  [ -f "$wd_last_path" ] && wd_last="$(cat "$wd_last_path" 2>/dev/null || printf '0')"
+  case "$wd_last" in ''|*[!0-9]*) wd_last=0 ;; esac
+  if [ $(( $(date +%s) - wd_last )) -ge "$watchdog_interval" ]; then
+    mkdir -p "$(dirname "$wd_last_path")"
+    date +%s >"$wd_last_path"
+    # Detach fully: close stdin/stdout/stderr and fd 3 so the backgrounded
+    # watchdog never holds a caller's fd open (which would hang bats under test).
+    "$script_dir/send_to_nvim/health-check.sh" </dev/null >/dev/null 2>&1 3>&- &
+  fi
+fi
+
 last_auto=0
 # Prefer tmux option (single IPC call, no file I/O) with file fallback
 last_auto="$(tmux show-option -gqv '@tmux-revive-last-auto-save' 2>/dev/null || printf '')"
