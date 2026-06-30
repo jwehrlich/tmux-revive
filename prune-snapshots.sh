@@ -169,7 +169,10 @@ manifest_rows="$(
     printf "%s\t%s\n" "$_epoch" "$1"
   ' _ {} \
   | while IFS=$'\t' read -r epoch snapshot_class keep_flag imported_flag manifest_path; do
-    case "$epoch" in ''|*[!0-9]*) epoch=0 ;; esac
+    # Avoid `case` here: this whole block runs inside $(...), and bash 3.2
+    # (macOS system bash) mis-parses a case `)` pattern inside command
+    # substitution as the closing paren. The numeric test is equivalent.
+    [ "$epoch" -eq "$epoch" ] 2>/dev/null || epoch=0
     if [ "$epoch" -le 0 ]; then
       epoch="$(stat -c '%Y' "$manifest_path" 2>/dev/null || stat -f '%m' "$manifest_path" 2>/dev/null || printf '0')"
     fi
