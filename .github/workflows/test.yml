@@ -47,3 +47,11 @@ jobs:
 
       - name: Run template test suite
         run: bats tests/templates.bats
+
+      - name: Run nvim persistence + autosave-leak + watchdog suites
+        run: >-
+          bats
+          tests/nvim.bats
+          tests/nvim_persistence.bats
+          tests/nvim_autosave_leak.bats
+          tests/nvim_health_check.bats

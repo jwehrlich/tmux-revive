@@ -203,6 +203,11 @@ EOF
 }
 
 @test "nvim persistence policy" {
+  # This case exercises core/options.lua + core/autocmds.lua, which live in the
+  # user's nvim config (~/.dev_setup/nvim), not in this plugin repo. Skip when
+  # they aren't present so the suite stays green in CI and standalone checkouts.
+  [ -f "$repo_root/nvim/lua/core/options.lua" ] || skip "nvim config not part of this repo"
+
   file_path="$case_root/persist.txt"
   echo "one" >"$file_path"
   report_path="$case_root/persist-report.json"
