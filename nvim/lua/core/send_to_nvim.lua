@@ -7,6 +7,7 @@ local initialized = false
 local restored_from_env = false
 local last_restored_state = nil
 local autosave_timer = nil
+local autosave_active = false
 local session_restored = false -- true once any restore path has fired
 
 -- ---------------------------------------------------------------------------
@@ -301,12 +302,26 @@ local function autosave_session()
 end
 
 local function start_autosave_timer()
+  autosave_active = true
   if autosave_timer then return end
   autosave_timer = vim.uv.new_timer()
-  autosave_timer:start(60000, 60000, vim.schedule_wrap(autosave_session))
+  autosave_timer:start(60000, 0, function()
+    autosave_timer:stop()
+    autosave_timer:close()
+    autosave_timer = nil
+    vim.schedule(function()
+      if not autosave_active then return end
+      local ok, err = pcall(autosave_session)
+      if not ok then
+        vim.notify("send_to_nvim autosave failed: " .. tostring(err), vim.log.levels.ERROR)
+      end
+      if autosave_active then start_autosave_timer() end
+    end)
+  end)
 end
 
 local function stop_autosave_timer()
+  autosave_active = false
   if autosave_timer then
     autosave_timer:stop()
     autosave_timer:close()
